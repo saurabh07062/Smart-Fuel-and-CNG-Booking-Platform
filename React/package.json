@@ -1,0 +1,22 @@
+{
+  "name": "fuelmart-react",
+  "private": true,
+  "version": "1.0.0",
+  "description": "FuelMart (React edition): Express + MongoDB backend and React + Vite frontend.",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "backend": "npm --prefix backend start",
+    "frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "typecheck": "npm --prefix frontend run typecheck",
+    "test": "npm --prefix backend test",
+    "test:server": "npm --prefix backend run test:server",
+    "test:realtime": "node --test backend/test/realtime.test.js",
+    "db:export": "node database/export.js",
+    "db:import": "node database/import.js"
+  },
+  "dependencies": {
+    "backend": "^0.0.0"
+  }
+}

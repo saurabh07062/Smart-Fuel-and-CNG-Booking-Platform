@@ -1,0 +1,1349 @@
+/* ============================================================
+   FUELMART OPERATOR CONSOLE — shared design system
+
+   One visual language for every page an admin or vendor operates:
+   Vendor Management, the Admin console, the Vendor Panel and the
+   Super Admin view. Built for Zomato's marketplace look — a white
+   ground rather than a dark dashboard, one saturated red carrying
+   every accent, the green numeral pill, 16px card radii, and a
+   dashed rule splitting a card's headline from its footer facts.
+
+   HOW TO USE IT
+   A page opts in by wrapping its markup in <div class="vm"> and
+   using the vm-* components below. Everything is scoped under that
+   class, so the customer-facing app (landing, booking, stations)
+   keeps its own blue identity from variables.css untouched.
+
+   The `vm-` prefix is historical — this started life as the Vendor
+   Management stylesheet. Read it as "the console namespace"; it is
+   deliberately short because it appears on nearly every element.
+
+   Both themes are handled here, which is most of why these pages
+   were moved onto it: the admin and vendor panels used to hardcode
+   `bg-[#0F172A]` and similar, so they ignored the theme toggle
+   entirely and stayed dark even in light mode.
+   ============================================================ */
+
+.vm {
+  /* Brand */
+  --z-red: #e23744;
+  --z-red-dark: #c7202d;
+  --z-red-tint: #fff0f1;
+  --z-red-line: #f5c6ca;
+
+  /* The rating-pill green. Reserved for "this one is fine". */
+  --z-green: #267e3e;
+  --z-green-tint: #eaf5ed;
+  --z-amber: #d97b1a;
+  --z-amber-tint: #fdf3e7;
+  --z-blue: #2b6cb0;
+  --z-blue-tint: #ebf3fb;
+  --z-slate: #5b6b7f;
+  --z-slate-tint: #eef1f5;
+
+  /* Neutrals - warm-biased greys, not pure, so they read as chosen */
+  --z-ink: #1c1c1c;
+  --z-body: #4f4f4f;
+  --z-grey: #696969;
+  --z-light: #9c9c9c;
+  --z-line: #e8e8e8;
+  --z-line-soft: #f0f0f0;
+  --z-ground: #f8f8f8;
+  --z-surface: #ffffff;
+
+  --z-shadow: 0 2px 8px rgba(28, 28, 28, 0.06);
+  --z-shadow-lift: 0 6px 20px rgba(28, 28, 28, 0.12);
+
+  --z-sans: "Poppins", "Inter", system-ui, -apple-system, sans-serif;
+  --z-body-font: "Inter", system-ui, -apple-system, sans-serif;
+
+  font-family: var(--z-body-font);
+  color: var(--z-body);
+  background: var(--z-ground);
+}
+
+[data-theme="dark"] .vm {
+  --z-ink: #f5f5f5;
+  --z-body: #d4d4d4;
+  --z-grey: #a8a8a8;
+  --z-light: #8a8a8a;
+  --z-line: #2f2f33;
+  --z-line-soft: #26262a;
+  --z-ground: #131316;
+  --z-surface: #1c1c20;
+  --z-red-tint: #341a1d;
+  --z-red-line: #5c2a2f;
+  --z-green: #48b06a;
+  --z-green-tint: #16301f;
+  --z-amber: #e0a355;
+  --z-amber-tint: #33230f;
+  --z-blue: #6aa5dd;
+  --z-blue-tint: #14243a;
+  --z-slate: #94a3b8;
+  --z-slate-tint: #22262c;
+  --z-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --z-shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.55);
+}
+
+.vm ::selection {
+  background: var(--z-red-tint);
+  color: var(--z-red-dark);
+}
+
+/* ---------------------------------------------------- shell */
+
+.vm-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--z-ground);
+}
+
+.vm-rail {
+  width: 244px;
+  flex-shrink: 0;
+  background: var(--z-surface);
+  border-right: 1px solid var(--z-line);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 14px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.vm-logo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 8px 22px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  text-align: left;
+  width: 100%;
+}
+.vm-logo-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--z-red);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  flex-shrink: 0;
+}
+.vm-logo-text {
+  display: block;
+  min-width: 0;
+}
+.vm-logo-name {
+  display: block;
+  font-family: var(--z-sans);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  color: var(--z-ink);
+  line-height: 1.15;
+}
+.vm-logo-sub {
+  display: block;
+  font-size: 10.5px;
+  color: var(--z-light);
+  letter-spacing: 0.02em;
+}
+
+.vm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.vm-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: none;
+  background: none;
+  font-family: var(--z-body-font);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--z-grey);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  text-align: left;
+  position: relative;
+}
+.vm-nav-item i {
+  width: 17px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--z-light);
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.vm-nav-item:hover {
+  background: var(--z-line-soft);
+  color: var(--z-ink);
+}
+.vm-nav-item:hover i {
+  color: var(--z-grey);
+}
+.vm-nav-item.is-active {
+  background: var(--z-red-tint);
+  color: var(--z-red);
+  font-weight: 600;
+}
+.vm-nav-item.is-active i {
+  color: var(--z-red);
+}
+.vm-nav-count {
+  margin-left: auto;
+  background: var(--z-red);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.vm-rail-foot {
+  border-top: 1px solid var(--z-line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vm-rail-foot .vm-nav-item {
+  padding: 9px 13px;
+  font-size: 13px;
+}
+.vm-nav-item.is-danger,
+.vm-nav-item.is-danger i {
+  color: var(--z-red);
+}
+.vm-nav-item.is-danger:hover {
+  background: var(--z-red-tint);
+}
+
+.vm-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* --------------------------------------------------- topbar */
+
+.vm-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--z-surface);
+  border-bottom: 1px solid var(--z-line);
+  padding: 16px 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.vm-title {
+  font-family: var(--z-sans);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--z-ink);
+  margin: 0 0 2px;
+  line-height: 1.2;
+}
+.vm-subtitle {
+  font-size: 12.5px;
+  color: var(--z-light);
+  margin: 0;
+}
+.vm-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.vm-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.vm-user-name {
+  font-family: var(--z-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--z-ink);
+  line-height: 1.2;
+  text-align: right;
+}
+.vm-user-role {
+  font-size: 10.5px;
+  color: var(--z-light);
+  text-align: right;
+}
+.vm-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--z-line);
+}
+
+.vm-body {
+  padding: 24px 30px 48px;
+}
+
+/* -------------------------------------------------- buttons */
+
+.vm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-family: var(--z-body-font);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.vm-btn-primary {
+  background: var(--z-red);
+  color: #fff;
+}
+.vm-btn-primary:hover {
+  background: var(--z-red-dark);
+}
+.vm-btn-ghost {
+  background: var(--z-surface);
+  border-color: var(--z-line);
+  color: var(--z-grey);
+}
+.vm-btn-ghost:hover {
+  border-color: var(--z-light);
+  color: var(--z-ink);
+}
+.vm-btn-approve {
+  background: var(--z-green);
+  color: #fff;
+}
+.vm-btn-approve:hover {
+  filter: brightness(0.92);
+}
+.vm-btn-outline-red {
+  background: var(--z-surface);
+  border-color: var(--z-red-line);
+  color: var(--z-red);
+}
+.vm-btn-outline-red:hover {
+  background: var(--z-red-tint);
+}
+.vm-btn-sm {
+  padding: 7px 13px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+.vm-btn:focus-visible,
+.vm-nav-item:focus-visible,
+.vm-chip:focus-visible,
+.vm-icon-btn:focus-visible,
+.vm-card:focus-visible,
+.vm-row:focus-visible,
+.vm-search input:focus-visible {
+  outline: 2px solid var(--z-red);
+  outline-offset: 2px;
+}
+
+.vm-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--z-line);
+  background: var(--z-surface);
+  color: var(--z-grey);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.vm-icon-btn:hover {
+  border-color: var(--z-light);
+  color: var(--z-ink);
+}
+.vm-icon-btn.is-danger:hover {
+  background: var(--z-red-tint);
+  border-color: var(--z-red-line);
+  color: var(--z-red);
+}
+.vm-icon-btn.is-good:hover {
+  background: var(--z-green-tint);
+  border-color: var(--z-green);
+  color: var(--z-green);
+}
+
+/* ----------------------------------- the green numeral pill */
+/* Zomato's most recognisable component. Here it carries the
+   readiness score of a pending application, not a review star,
+   so the icon is a bolt rather than a star - same shape, honest
+   meaning. */
+
+.vm-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--z-green);
+  color: #fff;
+  font-family: var(--z-sans);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.vm-score i {
+  font-size: 9px;
+}
+.vm-score.is-mid {
+  background: var(--z-amber);
+}
+.vm-score.is-low {
+  background: var(--z-red);
+}
+.vm-score.is-none {
+  background: transparent;
+  color: var(--z-light);
+  border: 1px dashed var(--z-line);
+  font-weight: 500;
+}
+
+/* --------------------------------------------- status chips */
+
+.vm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.vm-status i {
+  font-size: 8px;
+}
+.vm-status-active {
+  background: var(--z-green-tint);
+  color: var(--z-green);
+}
+.vm-status-pending {
+  background: var(--z-amber-tint);
+  color: var(--z-amber);
+}
+.vm-status-review {
+  background: var(--z-blue-tint);
+  color: var(--z-blue);
+}
+.vm-status-suspended {
+  background: var(--z-slate-tint);
+  color: var(--z-slate);
+}
+.vm-status-rejected {
+  background: var(--z-red-tint);
+  color: var(--z-red);
+}
+
+/* ----------------------------------------- filters & search */
+
+.vm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.vm-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.vm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--z-line);
+  background: var(--z-surface);
+  font-family: var(--z-body-font);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--z-grey);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+.vm-chip:hover {
+  box-shadow: var(--z-shadow);
+  color: var(--z-ink);
+}
+.vm-chip.is-on {
+  border-color: var(--z-red-line);
+  background: var(--z-red-tint);
+  color: var(--z-red);
+  font-weight: 600;
+}
+.vm-chip-count {
+  font-size: 11px;
+  color: var(--z-light);
+  font-variant-numeric: tabular-nums;
+}
+.vm-chip.is-on .vm-chip-count {
+  color: var(--z-red);
+}
+
+.vm-search {
+  position: relative;
+  margin-left: auto;
+  min-width: 240px;
+}
+.vm-search i {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--z-red);
+  font-size: 13px;
+  pointer-events: none;
+}
+.vm-search input {
+  width: 100%;
+  padding: 10px 14px 10px 38px;
+  border-radius: 999px;
+  border: 1px solid var(--z-line);
+  background: var(--z-surface);
+  font-family: var(--z-body-font);
+  font-size: 13px;
+  color: var(--z-ink);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.vm-search input::placeholder {
+  color: var(--z-light);
+}
+.vm-search input:focus {
+  outline: none;
+  border-color: var(--z-light);
+  box-shadow: var(--z-shadow);
+}
+
+.vm-viewtoggle {
+  display: inline-flex;
+  border: 1px solid var(--z-line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--z-surface);
+}
+.vm-viewtoggle button {
+  width: 36px;
+  height: 38px;
+  border: none;
+  background: none;
+  color: var(--z-light);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+.vm-viewtoggle button:hover {
+  color: var(--z-ink);
+}
+.vm-viewtoggle button.is-on {
+  background: var(--z-red-tint);
+  color: var(--z-red);
+}
+
+/* -------------------------------------------- vendor cards */
+
+.vm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 18px;
+}
+
+.vm-card {
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
+  display: flex;
+  flex-direction: column;
+}
+.vm-card:hover {
+  box-shadow: var(--z-shadow-lift);
+  transform: translateY(-2px);
+  border-color: transparent;
+}
+
+/* The cover stands in for Zomato's restaurant photo: a tinted
+   band carrying the vendor's initial, so a card with no image
+   still has a recognisable anchor at a glance. */
+.vm-cover {
+  height: 92px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+  padding: 0;
+  background: linear-gradient(135deg, #e23744 0%, #ff6b74 100%);
+}
+.vm-cover.t-0 { background: linear-gradient(135deg, #e23744 0%, #ff7a5c 100%); }
+.vm-cover.t-1 { background: linear-gradient(135deg, #cb202d 0%, #f0605d 100%); }
+.vm-cover.t-2 { background: linear-gradient(135deg, #e8622e 0%, #f6a04a 100%); }
+.vm-cover.t-3 { background: linear-gradient(135deg, #b4232f 0%, #e5634f 100%); }
+.vm-cover.t-4 { background: linear-gradient(135deg, #d64550 0%, #f59a6a 100%); }
+.vm-cover-initial {
+  font-family: var(--z-sans);
+  font-size: 38px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+.vm-cover-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.vm-cover-status .vm-status {
+  background: rgba(255, 255, 255, 0.94);
+}
+.vm-cover-code {
+  position: absolute;
+  bottom: 9px;
+  left: 12px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.vm-card-body {
+  padding: 14px 16px 12px;
+  flex: 1;
+  cursor: pointer;
+}
+.vm-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+.vm-card-name {
+  font-family: var(--z-sans);
+  font-size: 15.5px;
+  font-weight: 600;
+  color: var(--z-ink);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-card-biz {
+  font-size: 12.5px;
+  color: var(--z-grey);
+  margin: 0 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-card-meta {
+  font-size: 11.5px;
+  color: var(--z-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-dot::before {
+  content: "\00b7";
+  margin: 0 6px;
+}
+
+/* Zomato separates the headline from the offer strip with a
+   dashed rule. Reused here for the facts strip. */
+.vm-card-split {
+  border: none;
+  border-top: 1px dashed var(--z-line);
+  margin: 12px 16px 0;
+}
+.vm-card-facts {
+  display: flex;
+  align-items: center;
+  padding: 11px 16px 14px;
+  gap: 10px;
+}
+.vm-fact {
+  flex: 1;
+  min-width: 0;
+}
+.vm-fact-value {
+  font-family: var(--z-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--z-ink);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-fact-value.is-money {
+  color: var(--z-green);
+}
+.vm-fact-label {
+  font-size: 10px;
+  color: var(--z-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1px;
+}
+.vm-card-actions {
+  display: flex;
+  gap: 7px;
+  padding: 0 16px 14px;
+}
+.vm-card-actions .vm-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------------------------ stat tiles */
+
+.vm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.vm-stat {
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.vm-stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.vm-stat-value {
+  font-family: var(--z-sans);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--z-ink);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.vm-stat-label {
+  font-size: 11.5px;
+  color: var(--z-light);
+  margin-top: 1px;
+}
+.i-red { background: var(--z-red-tint); color: var(--z-red); }
+.i-green { background: var(--z-green-tint); color: var(--z-green); }
+.i-amber { background: var(--z-amber-tint); color: var(--z-amber); }
+.i-blue { background: var(--z-blue-tint); color: var(--z-blue); }
+.i-slate { background: var(--z-slate-tint); color: var(--z-slate); }
+
+/* ---------------------------------------------- panel + list */
+
+.vm-panel {
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 16px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.vm-panel-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--z-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.vm-panel-title {
+  font-family: var(--z-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--z-ink);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.vm-panel-title i {
+  color: var(--z-red);
+  font-size: 13px;
+}
+.vm-panel-body {
+  padding: 6px 20px 14px;
+}
+.vm-panel-body.is-padded {
+  padding: 18px 20px;
+}
+.vm-link {
+  background: none;
+  border: none;
+  color: var(--z-red);
+  font-family: var(--z-body-font);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+.vm-link:hover {
+  text-decoration: underline;
+}
+
+.vm-rows {
+  display: flex;
+  flex-direction: column;
+}
+.vm-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border: none;
+  border-bottom: 1px solid var(--z-line-soft);
+  cursor: pointer;
+  text-align: left;
+  background: none;
+  width: 100%;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.vm-row:last-child {
+  border-bottom: none;
+}
+.vm-row:hover {
+  background: var(--z-line-soft);
+}
+.vm-row-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: var(--z-red-tint);
+  color: var(--z-red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--z-sans);
+  font-weight: 600;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.vm-row-avatar.is-rank {
+  background: var(--z-amber-tint);
+  color: var(--z-amber);
+}
+.vm-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.vm-row-name {
+  font-family: var(--z-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--z-ink);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-row-sub {
+  font-size: 11.5px;
+  color: var(--z-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-row-right {
+  text-align: right;
+  flex-shrink: 0;
+}
+.vm-row-value {
+  font-family: var(--z-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--z-green);
+  font-variant-numeric: tabular-nums;
+}
+.vm-row-meta {
+  font-size: 11px;
+  color: var(--z-light);
+  margin-top: 2px;
+}
+
+/* -------------------------------------------------- the table */
+
+.vm-table-wrap {
+  overflow-x: auto;
+}
+.vm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.vm-table thead th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--z-light);
+  padding: 12px 18px;
+  background: var(--z-ground);
+  border-bottom: 1px solid var(--z-line);
+}
+.vm-table tbody td {
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--z-line-soft);
+  color: var(--z-body);
+  vertical-align: middle;
+}
+.vm-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.vm-table tbody tr:hover {
+  background: var(--z-ground);
+}
+.vm-td-name {
+  font-family: var(--z-sans);
+  font-weight: 600;
+  color: var(--z-ink);
+  font-size: 13.5px;
+}
+.vm-td-sub {
+  font-size: 11px;
+  color: var(--z-light);
+}
+.vm-num {
+  font-variant-numeric: tabular-nums;
+}
+.vm-money {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--z-green);
+}
+.vm-td-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------- charts */
+
+.vm-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 190px;
+}
+.vm-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+.vm-bar-track {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  position: relative;
+}
+.vm-bar {
+  width: 100%;
+  border-radius: 6px 6px 3px 3px;
+  background: var(--z-red-tint);
+  transition: background 0.2s;
+  position: relative;
+}
+.vm-bar-col:hover .vm-bar {
+  background: var(--z-red);
+}
+.vm-bar-value {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--z-ink);
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 6px;
+  padding: 3px 7px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  box-shadow: var(--z-shadow);
+}
+.vm-bar-col:hover .vm-bar-value {
+  opacity: 1;
+}
+.vm-bar-label {
+  font-size: 10.5px;
+  color: var(--z-light);
+  font-weight: 500;
+}
+
+/* --------------------------------------------- detail header */
+
+.vm-back {
+  background: none;
+  border: none;
+  color: var(--z-grey);
+  font-family: var(--z-body-font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  margin-bottom: 16px;
+}
+.vm-back:hover {
+  color: var(--z-red);
+}
+
+.vm-hero {
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.vm-hero-cover {
+  height: 110px;
+  background: linear-gradient(135deg, #e23744 0%, #ff7a5c 100%);
+}
+.vm-hero-inner {
+  padding: 0 24px 22px;
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  margin-top: -38px;
+  flex-wrap: wrap;
+}
+.vm-hero-mark {
+  width: 78px;
+  height: 78px;
+  border-radius: 18px;
+  background: var(--z-surface);
+  border: 3px solid var(--z-surface);
+  box-shadow: var(--z-shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--z-sans);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--z-red);
+  flex-shrink: 0;
+}
+.vm-hero-text {
+  flex: 1;
+  min-width: 200px;
+  padding-bottom: 3px;
+}
+.vm-hero-name {
+  font-family: var(--z-sans);
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--z-ink);
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.vm-hero-sub {
+  font-size: 13px;
+  color: var(--z-grey);
+  margin: 0;
+}
+.vm-hero-actions {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 3px;
+  flex-wrap: wrap;
+}
+
+.vm-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  background: var(--z-surface);
+  border-top: 1px solid var(--z-line);
+}
+.vm-facts > div {
+  padding: 14px 24px;
+  border-right: 1px solid var(--z-line);
+  border-bottom: 1px solid var(--z-line);
+  min-width: 0;
+}
+.vm-facts-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--z-light);
+  margin-bottom: 3px;
+}
+.vm-facts-value {
+  font-size: 13px;
+  color: var(--z-ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  /* Vendors paste long, sometimes duplicated addresses into the
+     onboarding form. Left unclamped one of those stretches its row to
+     several hundred pixels and pushes everything else off screen. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ------------------------------------------- states & empties */
+
+.vm-empty {
+  text-align: center;
+  padding: 54px 20px;
+}
+.vm-empty > i {
+  font-size: 34px;
+  color: var(--z-line);
+  margin-bottom: 14px;
+  display: block;
+}
+.vm-empty-title {
+  font-family: var(--z-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--z-ink);
+  margin: 0 0 5px;
+}
+.vm-empty-text {
+  font-size: 13px;
+  color: var(--z-light);
+  margin: 0 0 18px;
+}
+.vm-empty-inline {
+  text-align: center;
+  padding: 28px 16px;
+  font-size: 13px;
+  color: var(--z-light);
+}
+
+.vm-skeleton {
+  background: linear-gradient(90deg, var(--z-line-soft) 25%, var(--z-line) 37%, var(--z-line-soft) 63%);
+  background-size: 400% 100%;
+  animation: vm-shimmer 1.3s ease-in-out infinite;
+  border-radius: 8px;
+}
+@keyframes vm-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vm-skeleton { animation: none; }
+  .vm-card:hover { transform: none; }
+}
+.vm-skel-card {
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.vm-section-head {
+  margin-bottom: 18px;
+}
+.vm-section-title {
+  font-family: var(--z-sans);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--z-ink);
+  margin: 0 0 2px;
+}
+.vm-section-sub {
+  font-size: 12.5px;
+  color: var(--z-light);
+  margin: 0;
+}
+
+/* ------------------------------------------------ responsive */
+
+@media (max-width: 900px) {
+  .vm-rail {
+    width: 68px;
+    padding: 16px 10px;
+  }
+  .vm-logo-text,
+  .vm-nav-item span {
+    display: none;
+  }
+  .vm-logo {
+    justify-content: center;
+    padding: 0 0 22px;
+  }
+  .vm-nav-item {
+    justify-content: center;
+    padding: 12px 0;
+  }
+  .vm-nav-count {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    margin: 0;
+  }
+  .vm-body,
+  .vm-topbar {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+@media (max-width: 620px) {
+  .vm-user-name,
+  .vm-user-role {
+    display: none;
+  }
+  .vm-search {
+    min-width: 100%;
+    margin-left: 0;
+  }
+}
+
+/* ============================================================
+   BRIDGE UTILITIES
+
+   The admin, vendor-panel and super-admin pages were written as
+   large Tailwind templates against hardcoded slate hex values
+   (bg-[#0F172A], text-gray-400 ...). Those ignore the theme
+   entirely: the pages stayed dark in light mode.
+
+   Rewriting several thousand lines of that markup into semantic
+   components in one pass would be a lot of churn for a visual
+   change, so the raw colour utilities are mapped onto these
+   token-backed equivalents instead. Same class-per-property shape
+   the templates already use, but every value now comes from the
+   console palette and follows both themes.
+   ============================================================ */
+
+.vm .vm-bg-ground { background: var(--z-ground); }
+.vm .vm-bg-surface { background: var(--z-surface); }
+.vm .vm-border { border-color: var(--z-line); }
+.vm .vm-hover:hover { background: var(--z-line-soft); }
+.vm .vm-text { color: var(--z-ink); }
+.vm .vm-text-muted { color: var(--z-light); }
+
+/* Inputs inside a console page. */
+.vm .vm-input {
+  background: var(--z-surface);
+  border: 1px solid var(--z-line);
+  border-radius: 8px;
+  color: var(--z-ink);
+  font-family: var(--z-body-font);
+}
+.vm .vm-input:focus {
+  outline: none;
+  border-color: var(--z-red);
+  box-shadow: 0 0 0 3px var(--z-red-tint);
+}
+.vm select.vm-input,
+.vm input.vm-input,
+.vm textarea.vm-input {
+  padding: 10px 12px;
+  font-size: 13.5px;
+}
+
+/* These templates set their own padding and radii through utility classes,
+   so a panel used inline must not also carry the component's own margin. */
+.vm .vm-panel > .vm-panel-title { margin-bottom: 12px; }
+
+/* Tailwind's own greys still appear on a few one-off elements. Anything
+   inside a console page that asks for a light-on-dark grey gets the
+   themed equivalent instead, so nothing renders grey-on-white. */
+.vm .text-gray-300,
+.vm .text-gray-200,
+.vm .text-gray-100 { color: var(--z-ink); }
+.vm .text-slate-400,
+.vm .text-slate-500 { color: var(--z-light); }
+
+/* One accent, applied to everything interactive on a console page. These
+   replace the blue/cyan the admin and vendor templates were written
+   against, so a button, a focus ring and an active pill are all the same
+   colour regardless of which page you are on. */
+.vm .vm-accent { background: var(--z-red); color: #fff; }
+.vm .vm-accent-dark { background: var(--z-red-dark); color: #fff; }
+.vm .vm-accent-hover:hover { background: var(--z-red-dark); color: #fff; }
+.vm .vm-accent-text { color: var(--z-red); }
+.vm .vm-accent-border { border-color: var(--z-red); }
+.vm .vm-accent-soft { background: var(--z-red-tint); color: var(--z-red); }
+.vm .vm-accent-border:focus,
+.vm .focus\:vm-accent-border:focus { border-color: var(--z-red); }
+
+/* A card that lifts its border on hover, used by the station and stat cards
+   in the vendor panel. */
+.vm .vm-hover-border:hover { border-color: var(--z-light); }

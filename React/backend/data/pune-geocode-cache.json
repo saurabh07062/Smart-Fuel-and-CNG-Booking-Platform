@@ -1,0 +1,1160 @@
+{
+ "node/278887458": {
+  "road": null,
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411028"
+ },
+ "node/283204710": {
+  "road": "North Main Road",
+  "suburb": "Ghorpuri",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/518664242": {
+  "road": "North Main Road",
+  "suburb": "Ghorpuri",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/674708235": {
+  "road": null,
+  "suburb": "Wanawadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/763515722": {
+  "road": "Vishrantwadi - Airport Road",
+  "suburb": "Tingrenagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/763515723": {
+  "road": null,
+  "suburb": "Ward 3",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/1280209016": {
+  "road": "Sant Jnaneshwar Marg",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "412105"
+ },
+ "node/1534503367": {
+  "road": "Gopal Krushna Gokhale Path",
+  "suburb": "Deccan Gymkhana",
+  "city": "Pune",
+  "postcode": "411004"
+ },
+ "node/1534841979": {
+  "road": "KK Market road",
+  "suburb": "Panchavati",
+  "city": "Pune",
+  "postcode": "411046"
+ },
+ "node/1534841981": {
+  "road": "Tanaji Malusare Path",
+  "suburb": "Dattawadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/1624128500": {
+  "road": "Hinjawadi Phase 2 Road",
+  "suburb": "Sakhare Vasti",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "node/1684953195": {
+  "road": "Wakad Road",
+  "suburb": "Wakad gaav",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "node/1705497109": {
+  "road": null,
+  "suburb": "Dattawadi",
+  "city": "Anandnagar",
+  "postcode": "411001"
+ },
+ "node/1829975077": {
+  "road": null,
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "node/1830344236": {
+  "road": null,
+  "suburb": "Marunji",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "node/1849550673": {
+  "road": null,
+  "suburb": "Nigdi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411044"
+ },
+ "node/2345384738": {
+  "road": "Kate Vasti Road",
+  "suburb": "Pimple Saudagar",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411027"
+ },
+ "node/2502782348": {
+  "road": "NH753F",
+  "suburb": "Loni kand",
+  "city": "Pune",
+  "postcode": "412216"
+ },
+ "node/2502782349": {
+  "road": "NH753F",
+  "suburb": "Loni kand",
+  "city": "Pune",
+  "postcode": "412216"
+ },
+ "node/2929239716": {
+  "road": "Jagannath Shankarsheth Marg",
+  "suburb": "Mukund Nagar",
+  "city": "Pune",
+  "postcode": "411042"
+ },
+ "node/3498347004": {
+  "road": null,
+  "suburb": "Nigdi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411044"
+ },
+ "node/3504368176": {
+  "road": "Narveer Tanaji Malusare Marg",
+  "suburb": "Manik Baug",
+  "city": "Anandnagar",
+  "postcode": "411051"
+ },
+ "node/3522891765": {
+  "road": "Magarpatta Road",
+  "suburb": "Mundhwa",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/3523531813": {
+  "road": "Kharadi Bypass",
+  "suburb": "Kharadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/4165758692": {
+  "road": "Bhau Patil Path",
+  "suburb": "Mandalay Lines",
+  "city": "Khadki",
+  "postcode": "411001"
+ },
+ "node/4664779091": {
+  "road": "service road",
+  "suburb": "Talegaon Dabhade",
+  "city": "Talegaon Dabhade",
+  "postcode": "410506"
+ },
+ "node/4678212190": {
+  "road": "Manik Nagar Lane No.1A",
+  "suburb": "Somwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/5100406179": {
+  "road": null,
+  "suburb": "Mahesh Society",
+  "city": "Pune",
+  "postcode": "411046"
+ },
+ "node/5784328171": {
+  "road": "Hinjawadi - Wakad Road",
+  "suburb": "Parkhe Vasti",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "node/6926194405": {
+  "road": "Saswad Bopdev Pune Road",
+  "suburb": "Chambli",
+  "city": "Pune",
+  "postcode": "412301"
+ },
+ "node/6987289750": {
+  "road": "Pune Nashik Road",
+  "suburb": "Chakan",
+  "city": "Chakan",
+  "postcode": "410500"
+ },
+ "node/7003977285": {
+  "road": null,
+  "suburb": "Warje",
+  "city": "Anandnagar",
+  "postcode": "411051"
+ },
+ "node/7031749414": {
+  "road": "Pune Nashik Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411039"
+ },
+ "node/7031749438": {
+  "road": "Dehu - Alandi Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411062"
+ },
+ "node/7837166086": {
+  "road": "Hinjawadi - Chinchwad Road",
+  "suburb": "Ratnadeep Colony",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "node/7837166116": {
+  "road": null,
+  "suburb": "Ratnadeep Colony",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "node/8937735777": {
+  "road": null,
+  "suburb": "Bhosari",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411026"
+ },
+ "node/9204207098": {
+  "road": "Dr. Homi Bhabha Marg",
+  "suburb": "Model Colony",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/9354791022": {
+  "road": null,
+  "suburb": "Aundh",
+  "city": "Pune",
+  "postcode": "411027"
+ },
+ "node/9520201461": {
+  "road": "Baner Road",
+  "suburb": "Model Colony",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/9837863245": {
+  "road": "Ghotawade road",
+  "suburb": "Ghotawade",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "node/9837876660": {
+  "road": "Ghotawade road",
+  "suburb": "Ghotawade",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "node/10091349942": {
+  "road": "Paud Road",
+  "suburb": "Bhukum",
+  "city": "Pune",
+  "postcode": "412115"
+ },
+ "node/10172907606": {
+  "road": null,
+  "suburb": "Saswad",
+  "city": "Saswad",
+  "postcode": "412300"
+ },
+ "node/10603436128": {
+  "road": null,
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411041"
+ },
+ "node/10603556730": {
+  "road": null,
+  "suburb": "Shivane",
+  "city": "Dhayari",
+  "postcode": "411058"
+ },
+ "node/10603598575": {
+  "road": "Sus Road",
+  "suburb": "Sus Gaon",
+  "city": "Pune",
+  "postcode": "411405"
+ },
+ "node/10660664531": {
+  "road": "Aundh-Ravet Road",
+  "suburb": "Ravet",
+  "city": "Pune",
+  "postcode": "412101"
+ },
+ "node/10672275824": {
+  "road": "Maan Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "node/10678061028": {
+  "road": "Dhanori Road",
+  "suburb": "Ward 1",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/10719666344": {
+  "road": "Hinjawadi - Wakad Road",
+  "suburb": "Parkhe Vasti",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "node/10724957186": {
+  "road": "Dhaonri - Lohgaon Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411047"
+ },
+ "node/10725055240": {
+  "road": "Dhaonri - Lohgaon Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411047"
+ },
+ "node/10725542119": {
+  "road": "Exit to Hinjawadi",
+  "suburb": "Parkhe Vasti",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "node/10745044185": {
+  "road": "New DP Road",
+  "suburb": "Gulmohar colony",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411027"
+ },
+ "node/10799704632": {
+  "road": "Sant Dyaneshwar Marg",
+  "suburb": "Ward 3",
+  "city": "Khadki",
+  "postcode": "411031"
+ },
+ "node/11050681544": {
+  "road": "Maan Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "node/11406933645": {
+  "road": "Mundhwa Road",
+  "suburb": "Vasantdada Sugar Institute Colony",
+  "city": "Pune",
+  "postcode": "411036"
+ },
+ "node/11688010839": {
+  "road": null,
+  "suburb": "Mundhwa",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/11700219151": {
+  "road": "Aditya Birla Hospital Marg",
+  "suburb": "Anand park",
+  "city": "Pune",
+  "postcode": "411033"
+ },
+ "node/11809104007": {
+  "road": "Lohgaon - Wagholi Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411023"
+ },
+ "node/11812030007": {
+  "road": null,
+  "suburb": "Wagholi",
+  "city": "Wagholi",
+  "postcode": "412207"
+ },
+ "node/11819900104": {
+  "road": "Pune Nashik Road",
+  "suburb": null,
+  "city": "Pune",
+  "postcode": "411035"
+ },
+ "node/11819926874": {
+  "road": null,
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411035"
+ },
+ "node/11830258530": {
+  "road": "Paud Road",
+  "suburb": "Bavdhan",
+  "city": "Pune",
+  "postcode": "411051"
+ },
+ "node/11832697270": {
+  "road": "Vaibhav Nagar Road",
+  "suburb": "Pimpri",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411017"
+ },
+ "node/11862093825": {
+  "road": "Nagar Road",
+  "suburb": null,
+  "city": "Pune",
+  "postcode": "411023"
+ },
+ "node/12035806969": {
+  "road": "Mukesh Nagar Road",
+  "suburb": "Ajmera",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "300054"
+ },
+ "node/12049125596": {
+  "road": "Underpass",
+  "suburb": "Pimpri",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "300054"
+ },
+ "node/13371336963": {
+  "road": "NH48",
+  "suburb": "Somatane",
+  "city": "Pune",
+  "postcode": "410506"
+ },
+ "node/13380453522": {
+  "road": "Lakshmi Road",
+  "suburb": "Bhosari",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411026"
+ },
+ "node/13380495950": {
+  "road": "Kharadi Bypass",
+  "suburb": "Kharadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13381071099": {
+  "road": "Pune Nashik Road",
+  "suburb": "Bhosari",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411026"
+ },
+ "node/13381090117": {
+  "road": "Pune Nashik Road",
+  "suburb": "Bhosari",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411026"
+ },
+ "node/13595214019": {
+  "road": null,
+  "suburb": "Warje",
+  "city": "Anandnagar",
+  "postcode": "411051"
+ },
+ "node/13616206127": {
+  "road": "Old Pune–Mumbai Highway",
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13619838571": {
+  "road": "Kondhwa Main Road",
+  "suburb": "Kondhwa",
+  "city": "Pune",
+  "postcode": "411048"
+ },
+ "node/13624423289": {
+  "road": null,
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13629179444": {
+  "road": "Bund Garden Road",
+  "suburb": "Somwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13629390548": {
+  "road": null,
+  "suburb": "Ward 1",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13629426866": {
+  "road": "Hadapsar - Manjari Road",
+  "suburb": null,
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13638581250": {
+  "road": "Pimple Saudagar - Kalewadi Road",
+  "suburb": "Rahatani",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411017"
+ },
+ "node/13640132352": {
+  "road": "NH48",
+  "suburb": "Somatane",
+  "city": "Pune",
+  "postcode": "410506"
+ },
+ "node/13644326122": {
+  "road": "Underpass",
+  "suburb": "Mangalwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13645646232": {
+  "road": "Raja Bahadur Mill Marg",
+  "suburb": "Mangalwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13648917399": {
+  "road": "Bapusaheb Kedari Road",
+  "suburb": "Wanawadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/13649490370": {
+  "road": "NH753F",
+  "suburb": "Loni kand",
+  "city": "Pune",
+  "postcode": "412216"
+ },
+ "node/13955632151": {
+  "road": "East Street",
+  "suburb": "Pune Cantonment",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "node/14026295667": {
+  "road": "GDP Road",
+  "suburb": "Mundhwa",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/108034254": {
+  "road": "Moledina Road",
+  "suburb": "Pune Cantonment",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/202299533": {
+  "road": "Gopal Krushna Gokhale Path",
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/218059567": {
+  "road": "Laxmi Path",
+  "suburb": "Navi Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/218697331": {
+  "road": "Karve Road",
+  "suburb": "Erandwane",
+  "city": "Pune",
+  "postcode": "411051"
+ },
+ "way/221923913": {
+  "road": null,
+  "suburb": null,
+  "city": "Pune",
+  "postcode": "411028"
+ },
+ "way/227926161": {
+  "road": "Senapati Bapat Marg",
+  "suburb": "Model Colony",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/230078114": {
+  "road": "Karve Road",
+  "suburb": "Erandwane",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/230078117": {
+  "road": "Karve Road",
+  "suburb": "Erandwane",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/233735610": {
+  "road": "Pashan-Bavdhan Road",
+  "suburb": "Anupam Park",
+  "city": "Pune",
+  "postcode": "411072"
+ },
+ "way/236178680": {
+  "road": "CNG Pump Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411062"
+ },
+ "way/238842685": {
+  "road": "Ganeshkhind Road",
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/238842690": {
+  "road": "K. B. Joshi Path",
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/241110645": {
+  "road": null,
+  "suburb": "Marutrao Gaikwad nagar",
+  "city": "Pune",
+  "postcode": "411027"
+ },
+ "way/248254621": {
+  "road": "Narveer Tanaji Malusare Marg",
+  "suburb": "Manik Baug",
+  "city": "Anandnagar",
+  "postcode": "411051"
+ },
+ "way/250324214": {
+  "road": "Paud Road",
+  "suburb": "Bhukum",
+  "city": "Pune",
+  "postcode": "412115"
+ },
+ "way/250324218": {
+  "road": null,
+  "suburb": "Bhukum",
+  "city": "Pune",
+  "postcode": "412115"
+ },
+ "way/260467926": {
+  "road": "Phugewadi-Pimple Gurav Road",
+  "suburb": "Pimple Gurav",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411012"
+ },
+ "way/262803648": {
+  "road": "Service Road",
+  "suburb": "Punawale",
+  "city": "Pune",
+  "postcode": "412101"
+ },
+ "way/262803649": {
+  "road": "Western High Street",
+  "suburb": "Shankar Kalat Nagar",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/262803650": {
+  "road": "Service Road",
+  "suburb": "Shankar Kalat Nagar",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/262803654": {
+  "road": null,
+  "suburb": "Punawale",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/262803655": {
+  "road": "Service Road",
+  "suburb": "Shankar Kalat Nagar",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/263797368": {
+  "road": null,
+  "suburb": "Kasarwadi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411034"
+ },
+ "way/263797374": {
+  "road": null,
+  "suburb": "Kasarwadi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "300054"
+ },
+ "way/273640008": {
+  "road": null,
+  "suburb": "Karve Nagar",
+  "city": "Pune",
+  "postcode": "411051"
+ },
+ "way/275490278": {
+  "road": null,
+  "suburb": "Dattawadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/281308013": {
+  "road": "Jangli Maharaj Path",
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/281308014": {
+  "road": "Bund Garden Road",
+  "suburb": "Somwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/282054949": {
+  "road": "Ganeshkhind Road",
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/282961103": {
+  "road": "Jangli Maharaj Path",
+  "suburb": "Deccan Gymkhana",
+  "city": "Pune",
+  "postcode": "411004"
+ },
+ "way/289375520": {
+  "road": "Lokmanya Tilak Marg",
+  "suburb": "Swargate",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/289375522": {
+  "road": "Lokmanya Tilak Marg",
+  "suburb": "Swargate",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/290034468": {
+  "road": null,
+  "suburb": "Ganesh Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/290034469": {
+  "road": "Bapusaheb Paranjape Path",
+  "suburb": "Guruwar Peth",
+  "city": "Pune",
+  "postcode": "411002"
+ },
+ "way/291939175": {
+  "road": "Nagar Road",
+  "suburb": "Yerawada",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/327073024": {
+  "road": "Babasaheb Ambedkar Marg",
+  "suburb": "Somwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/359517097": {
+  "road": "Hinjawadi Phase 2 Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "way/359519692": {
+  "road": "Service Road",
+  "suburb": "Ajmera",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411089"
+ },
+ "way/359521652": {
+  "road": "Alandi-Vishrantwadi Service Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "412105"
+ },
+ "way/359526007": {
+  "road": "Exit to Hinjawadi",
+  "suburb": "Parkhe Vasti",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/359551241": {
+  "road": null,
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "412105"
+ },
+ "way/359551995": {
+  "road": "Sakhare Vasti Road",
+  "suburb": "Chidoba Nagar",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/359561623": {
+  "road": "Service Road",
+  "suburb": "Ajmera",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411089"
+ },
+ "way/359745704": {
+  "road": null,
+  "suburb": "Wagholi",
+  "city": "Wagholi",
+  "postcode": "412207"
+ },
+ "way/359776369": {
+  "road": null,
+  "suburb": "Kharadi",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/359807988": {
+  "road": null,
+  "suburb": "Kalewadi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411017"
+ },
+ "way/359914776": {
+  "road": "Ganeshkhind Road",
+  "suburb": "Model Colony",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/359979168": {
+  "road": "Manjri Greens Road",
+  "suburb": "Gopalpatti",
+  "city": "Pune",
+  "postcode": "412307"
+ },
+ "way/360256873": {
+  "road": "Bharathi Vidyapeeth Road",
+  "suburb": "Katraj",
+  "city": "Pune",
+  "postcode": "411046"
+ },
+ "way/360257106": {
+  "road": "p",
+  "suburb": "Kondhwa Budruk",
+  "city": "Pune",
+  "postcode": "411048"
+ },
+ "way/360266650": {
+  "road": null,
+  "suburb": null,
+  "city": "Pune",
+  "postcode": "411060"
+ },
+ "way/365033389": {
+  "road": "Lohgaon - Shinde Vadgaon Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411047"
+ },
+ "way/580190219": {
+  "road": null,
+  "suburb": "Pimple Gurav",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411012"
+ },
+ "way/615881315": {
+  "road": "Service Road",
+  "suburb": "Ajmera",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411089"
+ },
+ "way/616291149": {
+  "road": null,
+  "suburb": "More Wasti",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411044"
+ },
+ "way/619198981": {
+  "road": "Aundh Ravet Road",
+  "suburb": "Wakad",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/619198982": {
+  "road": null,
+  "suburb": "Thergaon",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/640467751": {
+  "road": "Pune Nashik Road",
+  "suburb": "Chakan",
+  "city": "Chakan",
+  "postcode": "410500"
+ },
+ "way/640467919": {
+  "road": null,
+  "suburb": "Shirgaav",
+  "city": "Pune",
+  "postcode": "410506"
+ },
+ "way/642141503": {
+  "road": null,
+  "suburb": "Model Colony",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/652015869": {
+  "road": null,
+  "suburb": "Bavdhan",
+  "city": "Pune",
+  "postcode": "411072"
+ },
+ "way/662180798": {
+  "road": "Pimple Saudagar Road",
+  "suburb": "Kasarwadi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411061"
+ },
+ "way/662180799": {
+  "road": null,
+  "suburb": "Kasarwadi",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411034"
+ },
+ "way/667524679": {
+  "road": null,
+  "suburb": "Shivajinagar",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/808266829": {
+  "road": "Dange Chowk Road",
+  "suburb": "Bhujbal Chowk",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/910908493": {
+  "road": "Magarpatta Rear Approach Road",
+  "suburb": "Mundhwa",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/962586655": {
+  "road": "New DP Road",
+  "suburb": "Gulmohar colony",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411027"
+ },
+ "way/984647390": {
+  "road": "Talawade Chakan Road",
+  "suburb": null,
+  "city": "Pune",
+  "postcode": "412114"
+ },
+ "way/1030698235": {
+  "road": "Senapati Bapat Marg",
+  "suburb": "Model Colony",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/1102770572": {
+  "road": "Narveer Tanaji Malusare Marg",
+  "suburb": "Anandnagar",
+  "city": "Anandnagar",
+  "postcode": "411051"
+ },
+ "way/1109900436": {
+  "road": null,
+  "suburb": "Sharda Colony",
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411045"
+ },
+ "way/1119644244": {
+  "road": "Gopal Hari Deshmukh Marg",
+  "suburb": "Pallod Farms",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/1120268979": {
+  "road": "Babasaheb Ambedkar Marg",
+  "suburb": "Somwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/1162011103": {
+  "road": "Pune Nashik Road",
+  "suburb": null,
+  "city": "Pimpri-Chinchwad",
+  "postcode": "411039"
+ },
+ "way/1218703654": {
+  "road": null,
+  "suburb": "Khadakwasla",
+  "city": "Pune",
+  "postcode": "411024"
+ },
+ "way/1221529117": {
+  "road": "Narveer Tanaji Malusare Marg",
+  "suburb": "Vadgaon Budruk",
+  "city": "Anandnagar",
+  "postcode": "411051"
+ },
+ "way/1251553363": {
+  "road": "NH548DD",
+  "suburb": "Loni kand",
+  "city": "Pune",
+  "postcode": "412216"
+ },
+ "way/1251553364": {
+  "road": "NH753F",
+  "suburb": "Loni kand",
+  "city": "Pune",
+  "postcode": "412216"
+ },
+ "way/1271548533": {
+  "road": null,
+  "suburb": "Khadakwasla",
+  "city": "Pune",
+  "postcode": "411024"
+ },
+ "way/1299088048": {
+  "road": "Service Road",
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "way/1299088057": {
+  "road": "Service Road",
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "way/1299088060": {
+  "road": "Service Road",
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "way/1299088065": {
+  "road": "Service Road",
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "way/1299088066": {
+  "road": "Service Road",
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "way/1344760159": {
+  "road": null,
+  "suburb": "Dhayari",
+  "city": "Dhayari",
+  "postcode": "411046"
+ },
+ "way/1360551446": {
+  "road": "Dehu Road-Vikasnagar-Mukai Chowk Road",
+  "suburb": "Mamurdi",
+  "city": "Pune",
+  "postcode": "654321"
+ },
+ "way/1366185308": {
+  "road": null,
+  "suburb": "Mandalay Lines",
+  "city": "Khadki",
+  "postcode": "411001"
+ },
+ "way/1366186829": {
+  "road": "Baner-Pashan Link Road",
+  "suburb": "Pashan",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/1389750590": {
+  "road": "Laxmi Chowk road",
+  "suburb": "Shankar Kalat Nagar",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/1452847191": {
+  "road": null,
+  "suburb": "Ravet",
+  "city": "Pune",
+  "postcode": "412101"
+ },
+ "way/1462545803": {
+  "road": null,
+  "suburb": "Nande",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/1462545816": {
+  "road": null,
+  "suburb": "Mulkhed",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "way/1484014230": {
+  "road": "Hinjawadi Phase 2 Road",
+  "suburb": "Hinjawadi Phase 1",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/1491084000": {
+  "road": "Hinjawadi Phase 2 Road",
+  "suburb": "Hinjawadi Phase 2",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "way/1491084011": {
+  "road": "Hinjawadi Phase 2 Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "way/1504554807": {
+  "road": null,
+  "suburb": "Tathawade",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/1505092258": {
+  "road": "Maan Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "way/1505092267": {
+  "road": "Maan Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411115"
+ },
+ "way/1525799308": {
+  "road": "Bhumkar Das Gurge Road",
+  "suburb": "Hinjawadi",
+  "city": "Pune",
+  "postcode": "411057"
+ },
+ "way/1531434072": {
+  "road": "Babasaheb Ambedkar Marg",
+  "suburb": "Somwar Peth",
+  "city": "Pune",
+  "postcode": "411001"
+ },
+ "way/1533253964": {
+  "road": null,
+  "suburb": "Sus Gaon",
+  "city": "Pune",
+  "postcode": "411405"
+ },
+ "way/1533253966": {
+  "road": null,
+  "suburb": "Sus Gaon",
+  "city": "Pune",
+  "postcode": "411405"
+ },
+ "way/1540277087": {
+  "road": "Service Road",
+  "suburb": "Punawale",
+  "city": "Pune",
+  "postcode": "410005"
+ },
+ "way/1540277088": {
+  "road": "Service Road",
+  "suburb": "Punawale",
+  "city": "Pune",
+  "postcode": "410005"
+ }
+}

@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment files hold real secrets. Only .env.example is committed.
+.env
+.env.local
+*.local
+
+# Build output and caches
+dist/
+*.tsbuildinfo
+
+# Runtime user uploads (the folder's own .gitignore keeps it in place)
+backend/uploads/*
+!backend/uploads/.gitignore
+
+# Real database snapshot (contains user records)
+database/dump/
+
+# Pre-change backups written by one-off maintenance scripts (real station data)
+backend/backups/
+
+# Logs
+*.log

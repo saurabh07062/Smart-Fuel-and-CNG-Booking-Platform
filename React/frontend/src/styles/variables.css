@@ -1,0 +1,91 @@
+:root {
+  --bg: #ffffff;
+  --bg2: #f8fafc;
+  --card: #ffffff;
+  --card2: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text2: #334155;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --secondary: #10b981;
+  --secondary-light: #d1fae5;
+  --accent: #f97316;
+  --accent-light: #fff7ed;
+  --danger: #ef4444;
+  --danger-light: #fee2e2;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.07), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 32px -8px rgba(15, 23, 42, 0.14);
+  --shadow-xl: 0 24px 60px -12px rgba(15, 23, 42, 0.22);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --nav-bg: rgba(255, 255, 255, 0.85);
+  --map-bg: #e8f0e8;
+  --map-road: #ffffff;
+  --map-block: #d4ddd4;
+  --map-park: #c8e6c8;
+
+  /* Queue / status semantics — reused wherever a status pill is shown */
+  --status-good: #10b981;
+  --status-good-bg: #ecfdf5;
+  --status-warn: #f59e0b;
+  --status-warn-bg: #fffbeb;
+  --status-bad: #ef4444;
+  --status-bad-bg: #fef2f2;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radius scale */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+}
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --bg2: #0b1324;
+  --card: #1e293b;
+  --card2: #1a2436;
+  --border: #2b3a52;
+  --text: #f1f5f9;
+  --text2: #cbd5e1;
+  --muted: #94a3b8;
+  --primary: #3b82f6;
+  --primary-light: #1e3a5f;
+  --secondary: #34d399;
+  --secondary-light: #064e3b;
+  --accent: #fb923c;
+  --accent-light: #7c2d12;
+  --danger: #f87171;
+  --danger-light: #7f1d1d;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 24px 60px -12px rgba(0, 0, 0, 0.6);
+  --glass-bg: rgba(30, 41, 59, 0.7);
+  --glass-border: rgba(51, 65, 85, 0.5);
+  --nav-bg: rgba(15, 23, 42, 0.9);
+  --map-bg: #1a2332;
+  --map-road: #2a3a4a;
+  --map-block: #1e2d3d;
+  --map-park: #1a3a2a;
+
+  --status-good: #34d399;
+  --status-good-bg: rgba(52, 211, 153, 0.12);
+  --status-warn: #fbbf24;
+  --status-warn-bg: rgba(251, 191, 36, 0.12);
+  --status-bad: #f87171;
+  --status-bad-bg: rgba(248, 113, 113, 0.12);
+}

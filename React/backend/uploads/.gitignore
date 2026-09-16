@@ -1,0 +1,4 @@
+# Uploaded files are user data, not source. The directories are tracked (so a
+# fresh clone has the tree) but their contents are not.
+*
+!.gitignore

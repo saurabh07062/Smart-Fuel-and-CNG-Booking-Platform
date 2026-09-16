@@ -1,0 +1,38 @@
+/* ============================================================
+   FUELMART — global styles
+
+   The stylesheets below are the EXISTING ones, copied verbatim from
+   ../frontend/css. Nothing was re-authored.
+
+   That is deliberate, and it is the single most important decision
+   for "the UI must not change": every colour, radius, shadow and
+   animation in the Vanilla app lives in these files. Re-writing them
+   as Tailwind utilities would have introduced hundreds of small
+   visual differences that no test would catch.
+
+   styles.css already @imports variables, animations and components,
+   so only it and the two standalone sheets are listed here --
+   importing all six would process three of them twice and change
+   which rule wins on a specificity tie.
+
+   variables.css defines the tokens (--primary, --z-red, ...) as CSS
+   custom properties, and tailwind.config.js points its colour scale
+   at those same properties, so a utility class and a hand-written
+   rule always resolve to the same value.
+   ============================================================ */
+
+/* pulls in variables.css + animations.css + components.css */
+@import "./styles/styles.css";
+
+/* operator console (admin, vendor panel, vendor management, super admin) */
+@import "./styles/console.css";
+
+/* customer dashboard + booking flow (mirrors the console's layout metrics) */
+@import "./styles/customer.css";
+
+/* vendor secret-code access page */
+@import "./styles/vendor-secret-code.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
