@@ -19,7 +19,8 @@ booking status and stock.
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, TypeScript, Vite 6, Tailwind CSS, Zustand, React Router, Leaflet maps, Axios, Socket.IO client |
+| Frontend (Web) | React 18, TypeScript, Vite 6, Tailwind CSS, Zustand, React Router, Leaflet maps, Axios, Socket.IO client |
+| Mobile App | Capacitor 8 (Android), embedded web view, Capacitor Geolocation |
 | Backend | Node.js 20+ (tested on 24), Express 5, Mongoose 9, Socket.IO 4, JWT auth, Multer uploads, Nodemailer |
 | Database | MongoDB |
 | Cache / locks | Redis (optional — falls back to in-process locks and rate limits) |
