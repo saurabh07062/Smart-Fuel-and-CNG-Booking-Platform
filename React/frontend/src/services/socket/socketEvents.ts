@@ -21,6 +21,8 @@ export const SOCKET_EVENTS = {
   QUEUE_UPDATED: "queue:updated",
   SLOT_UPDATED: "slot:updated",
   INVENTORY_UPDATED: "inventory:updated",
+  /** Admins: a new vendor application { vendorId, name, businessName, vendorStatus }. */
+  VENDOR_REQUEST_CREATED: "vendor:requestCreated",
   VENDOR_APPROVED: "vendor:approved",
   VENDOR_STATUS_CHANGED: "vendor:statusChanged",
   NOTIFICATION_CREATED: "notification:created",

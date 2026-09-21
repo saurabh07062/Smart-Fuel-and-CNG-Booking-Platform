@@ -546,6 +546,55 @@ router.get("/orders", adminAuth, async (req, res) => {
   }
 });
 
+/** Orders that are over: nothing is reserved, queued or dispensing for them any more. */
+const DELETABLE_ORDER_STATUSES = ["completed", "cancelled", "expired", "no_show"];
+
+/**
+ * DELETE /api/v1/admin/orders/:bookingId
+ *
+ * Remove a finished order (completed -- the refuelling is done -- cancelled,
+ * expired or no-show) and its notifications. An order still in progress
+ * (upcoming, waitlisted, serving) is refused with 409: deleting it would leave
+ * a customer holding a pass for a slot and a queue that no longer matches.
+ * The delete is conditional on the status at that moment, so an order that
+ * changed state meanwhile is refused rather than removed. Its payment
+ * stops counting towards revenue, since revenue is computed from bookings.
+ */
+router.delete("/orders/:bookingId", adminAuth, async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    if (!require("mongoose").Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({ msg: "Invalid order id" });
+    }
+
+    const deleted = await Booking.findOneAndDelete({ _id: bookingId, status: { $in: DELETABLE_ORDER_STATUSES } }).lean();
+    if (!deleted) {
+      const existing = await Booking.findById(bookingId).select("status").lean();
+      if (!existing) return res.status(404).json({ msg: "Order not found" });
+      return res.status(409).json({
+        msg: `This order is ${existing.status}. Only completed, cancelled, expired or no-show orders can be deleted.`,
+        status: existing.status,
+      });
+    }
+
+    await require("../models/Notification").deleteMany({ booking: deleted._id });
+
+    // The customer's and vendor's lists refetch on a booking event and no
+    // longer find it.
+    try {
+      const station = deleted.station ? await Station.findById(deleted.station).select("owner").lean() : null;
+      realtime.bookingChanged(realtime.EVENTS.BOOKING_UPDATED, { ...deleted, deleted: true }, { stationOwner: station?.owner });
+    } catch (emitErr) {
+      console.error("[admin] order delete event failed:", emitErr.message);
+    }
+
+    res.json({ ok: true, msg: "Order deleted", bookingId: String(deleted._id) });
+  } catch (err) {
+    console.error("[admin] order delete failed:", err);
+    res.status(500).json({ msg: "Failed to delete the order" });
+  }
+});
+
 /**
  * PATCH /api/v1/admin/orders/:bookingId/status
  *

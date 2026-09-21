@@ -166,27 +166,66 @@ test("real-time: authentication, isolation and live delivery", async (t) => {
       assert.ok(got[0].payload.pricesUpdatedAt, "no timestamp on the price event");
     });
 
-    await t.test("a client NOT watching that station hears nothing", async () => {
+    // A station list, the dashboard and the booking picker do not watch any
+    // one station. They used to hear nothing, so new prices, stations and
+    // photos appeared only after a manual refresh.
+    await t.test("a client on a station list (watching nothing) receives the change live", async () => {
       const sock = await connect(ioClient, null);
       sockets.push(sock);
       await new Promise((r) => setTimeout(r, 300));
 
       const heard = collect(sock, ["fuelPrice:updated"], 2000);
       await changePrice(108.5);
-      assert.deepEqual(await heard, [], "a price event went to a client that never watched it");
+      const got = await heard;
+      assert.equal(got.length, 1, "a list page did not get the price change");
+      assert.equal(Number(got[0].payload.newPrice), 108.5);
     });
 
-    await t.test("unwatch stops delivery", async () => {
+    await t.test("a watcher gets each change exactly once, before and after unwatching", async () => {
       const sock = await connect(ioClient, null);
       sockets.push(sock);
       sock.emit("watch_station", String(station._id));
       await new Promise((r) => setTimeout(r, 300));
+
+      let heard = collect(sock, ["fuelPrice:updated"], 1500);
+      await changePrice(109.25);
+      assert.equal((await heard).length, 1, "a watcher heard the change twice (station room + stations room)");
+
       sock.emit("unwatch_station", String(station._id));
       await new Promise((r) => setTimeout(r, 300));
-
-      const heard = collect(sock, ["fuelPrice:updated"], 2000);
+      heard = collect(sock, ["fuelPrice:updated"], 1500);
       await changePrice(109.75);
-      assert.deepEqual(await heard, [], "unwatch did not stop delivery");
+      assert.equal((await heard).length, 1, "after unwatch the page still hears the change, once");
+    });
+
+    await t.test("a new station reaches clients that could not have been watching it", async () => {
+      const sock = await connect(ioClient, null);
+      sockets.push(sock);
+      await new Promise((r) => setTimeout(r, 300));
+
+      const heard = collect(sock, ["station:created"], 3000, (g) => g.length > 0);
+      const res = await fetch(`${API}/api/vendor-panel/stations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-auth-token": tokenFor(vendor) },
+        body: JSON.stringify({ name: `${tag}-new`, address: "Live Road, Pune", coordinates: { lat: 18.53, lng: 73.86 } }),
+      });
+      assert.equal(res.status, 201);
+      const created = await res.json();
+      const got = await heard;
+      assert.equal(got.length, 1, "station:created did not reach a list page");
+      assert.equal(String(got[0].payload._id), String(created._id));
+      assert.ok(!/"owner"|upiId/.test(JSON.stringify(got[0].payload)), "public payload leaked private fields");
+
+      // Deleting it tells the same page which station to remove.
+      const gone = collect(sock, ["station:deleted"], 3000, (g) => g.length > 0);
+      const del = await fetch(`${API}/api/vendor-panel/stations/${created._id}`, {
+        method: "DELETE",
+        headers: { "x-auth-token": tokenFor(vendor) },
+      });
+      assert.equal(del.status, 200);
+      const deleted = await gone;
+      assert.equal(deleted.length, 1, "station:deleted did not reach a list page");
+      assert.equal(String(deleted[0].payload.id), String(created._id), "the deletion did not say which station");
     });
 
     // ---------------------------------------- the public payload is trimmed
@@ -215,7 +254,20 @@ test("real-time: authentication, isolation and live delivery", async (t) => {
       const heard = collect(sock, ["fuelPrice:updated"], 2500);
       await changePrice(111.25);
       const got = await heard;
-      assert.ok(got.length >= 1, "the owning vendor did not receive their station's price change");
+      assert.equal(got.length, 1, "the owning vendor should get their station's change exactly once");
+      assert.ok(got[0].payload.owner, "the owner gets the full record, not the public view");
+    });
+
+    await t.test("an admin gets a station change exactly once, in full", async () => {
+      const sock = await connect(ioClient, adminToken);
+      sockets.push(sock);
+      await new Promise((r) => setTimeout(r, 500));
+
+      const heard = collect(sock, ["fuelPrice:updated"], 2500);
+      await changePrice(111.5);
+      const got = await heard;
+      assert.equal(got.length, 1, "an admin heard the change twice");
+      assert.ok(got[0].payload.owner, "admins get the full record");
     });
 
     // ------------------------------------------------- admin isolation

@@ -11,7 +11,7 @@ interface Props {
    * Page title shown in the top bar, the way the admin console titles its
    * pages. When set, the top bar shows the title instead of station search.
    */
-  title?: string;
+  title?: ReactNode;
   subtitle?: string;
   /** Adds the console's "Refresh" button to the top bar. */
   onRefresh?: () => void;

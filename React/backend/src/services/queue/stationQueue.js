@@ -59,22 +59,36 @@ const startMs = (b, fallback) =>
   new Date(b.fuelingStartTime || b.bookingStartTime || fallback).getTime();
 
 /**
- * Pure: serve `bookings` on ONE nozzle in order, as of `now`. Callers pass one
- * fuel's line (simulateStation groups by fuel).
+ * Pure: serve one fuel's line on its app nozzles (`resources`, default 1), as
+ * of `now`. Callers pass one fuel's rows (simulateStation groups by fuel).
  *
- * @param {Array<object>} bookings  _id, user, status, fuelType, bookingStartTime,
- *   bookingEndTime, arrivalTime, fuelingStartTime, serviceDurationSeconds;
- *   walk-ins in the same shape with kind "walkin"
+ *   - a vehicle being served keeps its nozzle until its fill ends
+ *   - vehicles already at the pump (checked in / walked in) are next, in
+ *     arrival order, each on whichever nozzle frees first
+ *   - booked vehicles not yet arrived follow in slot order, each no earlier
+ *     than its booked start, on whichever nozzle frees first
+ *
+ * With one nozzle this is exactly the single-line hand-over of
+ * services/queue/nozzleService.js.
+ *
+ * @param {Array<object>} bookings  _id, user, status, fuelType, resource,
+ *   bookingStartTime, bookingEndTime, arrivalTime, fuelingStartTime,
+ *   serviceDurationSeconds; walk-ins in the same shape with kind "walkin"
  * @param {Date} [now]
+ * @param {{resources?:number}} [opts]
  * @returns {{queueLength:number, waitMinutes:number, queueStatus:string,
- *   basis:string, etas:Array<{bookingId:string, kind:string, user:string|null, position:number, etaMinutes:number, turnAt:number|null}>, lineClearsAt:number}}
+ *   basis:string, etas:Array<{bookingId:string, kind:string, user:string|null,
+ *   position:number, etaMinutes:number, turnAt:number|null, resource:number}>,
+ *   lineClearsAt:number, servingCount:number, resources:number}}
+ *   lineClearsAt: when a vehicle arriving now would get a nozzle
  */
-function simulateNozzleLine(bookings, now = new Date()) {
+function simulateNozzleLine(bookings, now = new Date(), { resources = 1 } = {}) {
   const t = now.getTime();
   const slotMs = SLOT_SPACING_SECONDS * 1000;
+  const R = Math.max(1, Math.floor(Number(resources) || 1));
 
   const serving = [];
-  const arrived = []; // checked in / walked in, waiting for the nozzle (services/queue/nozzleService.js)
+  const arrived = []; // checked in / walked in, waiting for a nozzle (services/queue/nozzleService.js)
   const upcoming = [];
   for (const b of bookings || []) {
     if (b.status === "serving") serving.push(b);
@@ -89,9 +103,9 @@ function simulateNozzleLine(bookings, now = new Date()) {
   upcoming.sort((a, b) => new Date(a.bookingStartTime) - new Date(b.bookingStartTime));
 
   const etas = [];
-  // turnAt: the instant (ms) this vehicle reaches the nozzle, so the queue
+  // turnAt: the instant (ms) this vehicle reaches a nozzle, so the queue
   // clock knows when its whole-minute ETA next ticks down.
-  const eta = (b, position, minutes, turnAt = null) =>
+  const eta = (b, position, minutes, turnAt, resource) =>
     etas.push({
       bookingId: String(b._id),
       kind: b.kind || "booking",
@@ -99,43 +113,70 @@ function simulateNozzleLine(bookings, now = new Date()) {
       position,
       etaMinutes: minutes,
       turnAt,
+      resource,
     });
 
-  let free = t; // when the nozzle is next free
+  const free = new Array(R).fill(t); // when each nozzle is next free
+  // The nozzle that frees first (lowest number on a tie), at or after `notBefore`.
+  const soonest = (notBefore = -Infinity) => {
+    let best = 0;
+    for (let i = 1; i < R; i++) if (Math.max(free[i], notBefore) < Math.max(free[best], notBefore)) best = i;
+    return best;
+  };
+
   let inLine = 0;
   for (const b of serving) {
-    free = Math.max(free, startMs(b, now) + durationMs(b));
+    // Its own nozzle; one numbered past the current count shares the last.
+    const i = Math.min(R, Math.max(1, Number(b.resource) || 1)) - 1;
+    free[i] = Math.max(free[i], startMs(b, now) + durationMs(b));
     inLine += 1;
-    eta(b, inLine, 0);
+    eta(b, inLine, 0, null, i + 1);
   }
 
-  // Vehicles already at the nozzle are next, in arrival order: they are
-  // physically in line whatever a slot says, and the nozzle is handed to them
-  // first when it is released.
+  // Vehicles already at the pump are next, in arrival order: they are
+  // physically in line whatever a slot says, and a released nozzle is handed
+  // to them first.
   for (const b of arrived) {
-    const turn = free;
-    free = turn + durationMs(b);
+    const i = soonest();
+    const turn = free[i];
+    free[i] = turn + durationMs(b);
     inLine += 1;
-    eta(b, inLine, Math.ceil(Math.max(0, turn - t) / 60_000), turn);
+    eta(b, inLine, Math.ceil(Math.max(0, turn - t) / 60_000), turn, i + 1);
   }
 
-  let lineClearsAt = free;
+  let lineClearsAt = null;
   let position = inLine;
   for (const b of upcoming) {
     const slotStart = new Date(b.bookingStartTime).getTime();
-    const turn = Math.max(slotStart, free);
-    free = turn + durationMs(b);
+    // Sorted by start: every booking already due comes before any that isn't,
+    // so a newcomer's wait is fixed once the first future one is reached.
+    if (slotStart > t && lineClearsAt === null) lineClearsAt = Math.min(...free);
+    const i = soonest(slotStart);
+    const turn = Math.max(slotStart, free[i]);
+    free[i] = turn + durationMs(b);
     position += 1;
-    if (slotStart <= t) {
-      // Sorted by start, so every booking already due comes before any that isn't.
-      inLine += 1;
-      lineClearsAt = free;
-    }
-    eta(b, position, Math.ceil(Math.max(0, turn - t) / 60_000), turn);
+    if (slotStart <= t) inLine += 1;
+    eta(b, position, Math.ceil(Math.max(0, turn - t) / 60_000), turn, i + 1);
   }
+  if (lineClearsAt === null) lineClearsAt = Math.min(...free);
 
   const waitMinutes = Math.ceil(Math.max(0, lineClearsAt - t) / 60_000);
-  return { queueLength: inLine, waitMinutes, queueStatus: toQueueStatus(waitMinutes), basis: BASIS, etas, lineClearsAt };
+  return {
+    queueLength: inLine,
+    waitMinutes,
+    queueStatus: toQueueStatus(waitMinutes),
+    basis: BASIS,
+    etas,
+    lineClearsAt,
+    servingCount: serving.length,
+    resources: R,
+  };
+}
+
+/** Each fuel's app nozzle count at a station (config/nozzleModes.js), at least 1. */
+function resourcesByFuelOf(station) {
+  const { onlineResources } = require("../../config/nozzleModes");
+  return Object.fromEntries(FUEL_KEYS.map((f) => [f, Math.max(1, onlineResources(station, f))]));
 }
 
 /** Rows of one station, split into its fuels' lines (unknown fuels are left out). */
@@ -149,14 +190,14 @@ function groupByFuel(rows) {
  * Pure: a station's lines, one per fuel, and the station-wide totals lists
  * and caches read. The etas cover every fuel; positions are within a fuel.
  */
-function simulateStation(rows, now = new Date()) {
+function simulateStation(rows, now = new Date(), resourcesByFuel = {}) {
   const byFuel = {};
   const etas = [];
   let queueLength = 0;
   let waitMinutes = 0;
   let lineClearsAt = now.getTime();
   for (const [fuel, list] of groupByFuel(rows)) {
-    const line = simulateNozzleLine(list, now);
+    const line = simulateNozzleLine(list, now, { resources: resourcesByFuel[fuel] });
     byFuel[fuel] = {
       queueLength: line.queueLength,
       waitMinutes: line.waitMinutes,
@@ -192,6 +233,23 @@ function walkInRow(w) {
 }
 
 /**
+ * The walk-ins that are in a fuel's APP line: all of them where walk-ins share
+ * the app nozzle, none where they have their own nozzles (config/nozzleModes.js)
+ * -- except one still on the app nozzle from before the split was set.
+ */
+async function appLineWalkIns(walkIns) {
+  if (!walkIns.length) return walkIns;
+  const nozzleSetup = require("../../config/nozzleModes");
+  const ids = [...new Set(walkIns.map((w) => String(w.station)))];
+  const stations = await Station.find({ _id: { $in: ids } }).select("nozzleConfig").lean();
+  const byId = new Map(stations.map((st) => [String(st._id), st]));
+  return walkIns.filter((w) => {
+    if (!nozzleSetup.separateWalkIns(byId.get(String(w.station)), w.fuelType)) return true;
+    return w.status === "serving" && (w.lane === 0 || w.lane == null);
+  });
+}
+
+/**
  * Today's line rows for these stations from MongoDB: live bookings and active
  * walk-ins, keyed by station id.
  */
@@ -218,7 +276,7 @@ async function loadLineRows(stationIds, now = new Date(), { extraBookingFields =
   ]);
 
   for (const r of bookings) byStation.get(String(r.station))?.push(r);
-  for (const w of walkIns) byStation.get(String(w.station))?.push(walkInRow(w));
+  for (const w of await appLineWalkIns(walkIns)) byStation.get(String(w.station))?.push(walkInRow(w));
   return byStation;
 }
 
@@ -228,7 +286,10 @@ async function loadLineRows(stationIds, now = new Date(), { extraBookingFields =
  */
 async function queueSnapshots(stationIds, now = new Date()) {
   const rows = await loadLineRows(stationIds, now);
-  return new Map([...rows].map(([id, list]) => [id, simulateStation(list, now)]));
+  const stations = new Map(
+    (await Station.find({ _id: { $in: [...rows.keys()] } }).select("nozzleConfig").lean()).map((st) => [String(st._id), st]),
+  );
+  return new Map([...rows].map(([id, list]) => [id, simulateStation(list, now, resourcesByFuelOf(stations.get(id)))]));
 }
 
 /** Per-fuel totals, safe for any audience (no vehicles, no customers). */
@@ -327,15 +388,17 @@ function maskVehicle(plate) {
  * @param {string} [p.bookingDate] "YYYY-MM-DD" of that slot
  * @param {Date}   [p.now]
  */
-async function buildQueuePreview({ stationId, fuelType, quantity, slotStart = null, bookingDate = null, now = new Date() }) {
+async function buildQueuePreview({ stationId, fuelType, quantity, slotStart = null, bookingDate = null, timeSlot = null, now = new Date() }) {
   const fuel = normaliseFuel(fuelType);
   const t = now.getTime();
   const serviceSeconds = getServiceDurationSeconds(fuel, quantity);
+  const station = await Station.findById(stationId).select("nozzleConfig operatingSchedule openingHours status").lean();
+  const resources = resourcesByFuelOf(station)[fuel];
   const rows = ((await loadLineRows([stationId], now)).get(String(stationId)) || []).filter(
     (r) => normaliseFuel(r.fuelType) === fuel,
   );
   const byId = new Map(rows.map((r) => [String(r._id), r]));
-  const line = simulateNozzleLine(rows, now);
+  const line = simulateNozzleLine(rows, now, { resources });
 
   // The line as it stands, in serving order.
   const queue = line.etas.map((e) => {
@@ -368,8 +431,26 @@ async function buildQueuePreview({ stationId, fuelType, quantity, slotStart = nu
   };
 
   const isToday = !bookingDate || bookingDate === dateKey(now);
+  // A chosen window: the scheduler's own answer -- the exact position a
+  // booking made now would get (services/queue/nozzleScheduler.js), so the
+  // estimate and the booking never disagree.
+  const schedule = bookingDate && timeSlot
+    ? await scheduleForWindow({ stationId, fuel, quantity, bookingDate, timeSlot, station, now, serviceSeconds })
+    : null;
   let you;
-  if (!isToday && slotStart) {
+  // A full window has no position to show: the line estimate below stands.
+  if (schedule && schedule.resourceAvailable) {
+    const startAt = schedule.estimatedStartTime;
+    you = {
+      joinAt: new Date(schedule.joinAt),
+      position: schedule.queueAhead + 1,
+      vehiclesAhead: schedule.queueAhead,
+      estimatedWaitSeconds: schedule.expectedWaitSeconds,
+      estimatedStartAt: startAt,
+      estimatedCompleteAt: schedule.estimatedCompletionTime,
+      basis: "scheduler",
+    };
+  } else if (!isToday && slotStart) {
     you = {
       joinAt: slotStart,
       position: 1,
@@ -421,6 +502,72 @@ async function buildQueuePreview({ stationId, fuelType, quantity, slotStart = nu
     waitMinutes: line.waitMinutes,
     queue,
     you: { quantity, serviceSeconds, ...you },
+    // The scheduler's summary for the chosen window (null without one).
+    schedule: schedule
+      ? {
+          fuelType: fuelLabel(fuel),
+          serviceDurationSeconds: serviceSeconds,
+          resources: schedule.resources,
+          vehiclesServing: line.servingCount,
+          queueAhead: schedule.queueAhead,
+          expectedWaitSeconds: schedule.expectedWaitSeconds,
+          estimatedStartTime: schedule.estimatedStartTime,
+          estimatedCompletionTime: schedule.estimatedCompletionTime,
+          availableCapacity: schedule.availableCapacity,
+          totalCapacity: schedule.totalCapacity,
+          resourceAvailable: schedule.resourceAvailable,
+          reason: schedule.reason,
+        }
+      : null,
+  };
+}
+
+/**
+ * Where a booking made now would land in one window: from the scheduler's
+ * availability row (capacity and the next free position) and the nozzle
+ * occupancy it was worked out from (vehicles scheduled ahead of it).
+ */
+async function scheduleForWindow({ stationId, fuel, quantity, bookingDate, timeSlot, station, now, serviceSeconds }) {
+  const nozzleScheduler = require("./nozzleScheduler");
+  const rows = await nozzleScheduler.generateAvailability(stationId, fuel, bookingDate, { station, now, quantity });
+  const row = rows.find((r) => r.label === timeSlot);
+  if (!row) return null;
+  const win = nozzleScheduler.windowOf(bookingDate, timeSlot);
+  const joinAt = Math.max(now.getTime(), win.start.getTime());
+  const cap = row.capacity || { total: 0, available: 0, resources: 0 };
+  if (!row.bookable) {
+    return {
+      joinAt,
+      resources: cap.resources,
+      queueAhead: 0,
+      expectedWaitSeconds: null,
+      estimatedStartTime: null,
+      estimatedCompletionTime: null,
+      availableCapacity: 0,
+      totalCapacity: cap.total,
+      resourceAvailable: false,
+      reason: row.reason,
+    };
+  }
+  const start = row.start.getTime();
+  // Everyone on this fuel's nozzles between joining and that start: served,
+  // waiting, walked in or booked into the window ahead.
+  const windows =
+    (await nozzleScheduler.loadActiveWindows([stationId], new Date(joinAt), new Date(start), { now, fuelType: fuel })).get(
+      String(stationId),
+    ) || [];
+  const queueAhead = windows.filter((w) => new Date(w.start).getTime() < start && new Date(w.end).getTime() > joinAt).length;
+  return {
+    joinAt,
+    resources: cap.resources,
+    queueAhead,
+    expectedWaitSeconds: Math.max(0, Math.round((start - joinAt) / 1000)),
+    estimatedStartTime: new Date(start),
+    estimatedCompletionTime: new Date(start + serviceSeconds * 1000),
+    availableCapacity: cap.available,
+    totalCapacity: cap.total,
+    resourceAvailable: true,
+    reason: null,
   };
 }
 
@@ -445,7 +592,7 @@ const lineSignature = (snapshot) =>
  * Pure: the next instant at which this station's lines, waits or any ETA
  * change, or null if nothing live is left.
  */
-function nextQueueChange(bookings, now = new Date()) {
+function nextQueueChange(bookings, now = new Date(), resourcesByFuel = {}) {
   const t = now.getTime();
   const slotMs = SLOT_SPACING_SECONDS * 1000;
   let next = Infinity;
@@ -467,9 +614,9 @@ function nextQueueChange(bookings, now = new Date()) {
       consider(start + slotMs); // or drops out, never having arrived
     }
   }
-  for (const list of groupByFuel(bookings).values()) {
+  for (const [fuel, list] of groupByFuel(bookings)) {
     if (list.length === 0) continue;
-    const line = simulateNozzleLine(list, now);
+    const line = simulateNozzleLine(list, now, { resources: resourcesByFuel[fuel] });
     minuteTick(line.lineClearsAt);
     for (const e of line.etas) minuteTick(e.turnAt);
   }
@@ -515,7 +662,7 @@ async function reconcileQueues({ now = new Date(), stationIds = null } = {}) {
     byStation.get(key).push(r);
   };
   rows.forEach(add);
-  walkIns.map(walkInRow).forEach(add);
+  (await appLineWalkIns(walkIns)).map(walkInRow).forEach(add);
   // A station still showing a line whose bookings have all finished or gone.
   const showingLine = await Station.find({
     ...(stationIds ? { _id: { $in: stationIds } } : {}),
@@ -526,7 +673,7 @@ async function reconcileQueues({ now = new Date(), stationIds = null } = {}) {
   for (const s of showingLine) if (!byStation.has(String(s._id))) byStation.set(String(s._id), []);
 
   const cached = new Map(
-    (await Station.find({ _id: { $in: [...byStation.keys()] } }).select("queueLength waitMinutes queueStatus").lean()).map(
+    (await Station.find({ _id: { $in: [...byStation.keys()] } }).select("queueLength waitMinutes queueStatus nozzleConfig").lean()).map(
       (s) => [String(s._id), s],
     ),
   );
@@ -536,7 +683,7 @@ async function reconcileQueues({ now = new Date(), stationIds = null } = {}) {
   for (const [stationId, list] of byStation) {
     const station = cached.get(stationId);
     if (!station) continue;
-    const snap = simulateStation(list, now);
+    const snap = simulateStation(list, now, resourcesByFuelOf(station));
     const sentEta = new Map(list.filter((b) => b.kind !== "walkin").map((b) => [String(b._id), b.etaMinutes]));
     const sentLines = lastSentLines.get(stationId);
     const signature = lineSignature(snap);
@@ -552,7 +699,7 @@ async function reconcileQueues({ now = new Date(), stationIds = null } = {}) {
     } else {
       lastSentLines.set(stationId, signature);
     }
-    const next = nextQueueChange(list, now);
+    const next = nextQueueChange(list, now, resourcesByFuelOf(station));
     if (next && (!nextAt || next < nextAt)) nextAt = next;
   }
   if (refreshed) metrics.inc("queue_clock_refresh_count", refreshed);
@@ -599,6 +746,8 @@ module.exports = {
   simulateStation,
   groupByFuel,
   walkInRow,
+  appLineWalkIns,
+  resourcesByFuelOf,
   loadLineRows,
   queueSnapshots,
   fuelQueueSummary,

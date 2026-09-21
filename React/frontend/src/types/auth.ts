@@ -24,6 +24,8 @@ export interface User {
   vendorCode?: string | null;
   activated?: boolean;
   businessName?: string | null;
+  /** Vendors: fuel keys chosen at registration. Absent for older vendors (they sell every fuel). */
+  vendorFuelTypes?: Array<"petrol" | "diesel" | "cng">;
   wallet?: number;
   rewards?: number;
   vehicles?: Vehicle[];

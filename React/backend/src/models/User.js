@@ -33,6 +33,12 @@ const UserSchema = new mongoose.Schema({
   phone: { type: String },
   vendorAddress: { type: String },
   vendorDescription: { type: String },
+  // The fuels this vendor sells, chosen at registration (services/vendor/vendorFuels.js).
+  // Unset for vendors registered before it was recorded: they keep every fuel.
+  vendorFuelTypes: {
+    type: [{ type: String, enum: ["petrol", "diesel", "cng"] }],
+    default: undefined,
+  },
   // Where the applicant pinned their pump on the registration map. Pre-fills
   // the pin of their first "Add station". Only a real position is stored.
   registrationLocation: {

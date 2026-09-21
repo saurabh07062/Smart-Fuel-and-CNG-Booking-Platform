@@ -6,6 +6,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+// Test settings (far-off fixture dates are allowed): test/helpers/testDb.js.
+require("./helpers/testDb");
 
 test("lock: when distributed locking is required and Redis is absent, acquiring fails safely", async () => {
   const savedUrl = process.env.REDIS_URL;

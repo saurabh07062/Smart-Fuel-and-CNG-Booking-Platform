@@ -1,19 +1,38 @@
 /**
  * Process entry point: connect MongoDB, open the HTTP server with Socket.IO on
  * the Express app (src/app.js), then recover in-progress fills and start the
- * background jobs.
+ * background jobs. Stops cleanly on SIGINT/SIGTERM.
  *
  *   npm start      (from backend/)
+ *
+ * Logging (utils/logger.js): LOG_LEVEL=error|warn|info|debug (default info),
+ * LOG_FORMAT=json|pretty (default json when NODE_ENV=production).
  */
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
+
+const logger = require("./utils/logger");
+// Every existing console.* call now gets a timestamp, level and component.
+logger.installConsoleBridge();
+logger.enableHttpLogging();
+const log = logger.child("server");
+
+// A crash is logged with its stack before the process exits; a rejected
+// promise nobody handled is logged, not silently dropped.
+process.on("uncaughtException", (err) => {
+  log.error("Uncaught exception; shutting down", { err });
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  log.error("Unhandled promise rejection", { err: reason instanceof Error ? reason : new Error(String(reason)) });
+});
 
 // Refuse to start without a usable JWT secret and session settings
 // (config/auth.js), rather than crash on the first login.
 try {
   require("./config/auth").assertAuthConfig();
 } catch (err) {
-  console.error(`[auth] ${err.message}`);
+  logger.child("auth").error("Invalid auth configuration; refusing to start", { err });
   process.exit(1);
 }
 
@@ -32,21 +51,38 @@ const User = require("./models/User");
 const { startBookingSweepJob, startInProgressSweepJob } = require("./services/booking/bookingSweep");
 const { startQueueClockJob } = require("./services/queue/stationQueue");
 
+log.info("Starting", {
+  env: process.env.NODE_ENV || "development",
+  node: process.version,
+  pid: process.pid,
+  logLevel: process.env.LOG_LEVEL || "info",
+});
+
 // Connect DB
+const dbLog = logger.child("mongodb");
 mongoose
   .connect(process.env.MONGO_URI || "mongodb://localhost:27017/fuelmart")
-  .then(() => console.log("MongoDB Connected"))
-  .catch((err) => console.log("MongoDB Connection Error:", err));
+  // Where it connected: host, port and database only -- never the user or
+  // password that MONGO_URI may carry.
+  .then(() => {
+    const { host, port, name } = mongoose.connection;
+    dbLog.info("Connected", { host, port, database: name });
+  })
+  .catch((err) => dbLog.error("Connection failed", { err }));
+mongoose.connection.on("disconnected", () => dbLog.warn("Disconnected"));
+mongoose.connection.on("reconnected", () => dbLog.info("Reconnected"));
 
 // The booking double-booking guard is a database index; make sure it exists
 // and say so loudly if existing data prevents building it.
 require("./models/Booking")
   .init()
-  .then(() => console.log("[indexes] Booking indexes ready (incl. uniq_active_nozzle_start_per_fuel)"))
-  .catch((err) => console.error("[indexes] Booking index build FAILED:", err.message));
+  .then(() => dbLog.info("Booking indexes ready"))
+  .catch((err) => dbLog.error("Booking index build failed", { err }));
 
 const DEFAULT_PORT = process.env.PORT || 5000;
 const MAX_RETRIES = 5;
+
+let running = null; // { server, io } once listening
 
 // The HTTP server (and socket.io) is created inside startServer so we can
 // retry with a different port if the desired port is already in use.
@@ -63,12 +99,14 @@ function startServer(port, retriesLeft) {
   app.set("io", io);
 
   server.on("error", (err) => {
-    if (err && err.code === "EADDRINUSE" && retriesLeft > 0) {
-      console.warn(`Port ${port} is in use, trying port ${Number(port) + 1}...`);
-      // try next port
+    // Development only: in production a busy port means another copy is
+    // already running, and quietly moving to the next port would leave the
+    // proxy/clients talking to the old process.
+    if (err && err.code === "EADDRINUSE" && retriesLeft > 0 && process.env.NODE_ENV !== "production") {
+      log.warn(`Port ${port} is in use (another backend still running?). Starting on ${Number(port) + 1} -- the frontend proxy still points at the old port.`, { port, next: Number(port) + 1 });
       startServer(Number(port) + 1, retriesLeft - 1);
     } else {
-      console.error("Server error:", err);
+      log.error("HTTP server error", { port, err });
       process.exit(1);
     }
   });
@@ -83,9 +121,18 @@ function startServer(port, retriesLeft) {
   realtime.init(io);
 
   server.listen(port, async () => {
-    console.log(`Real backend server running on port ${port}`);
+    running = { server, io };
+    log.info("HTTP server listening", { port: Number(port), url: `http://localhost:${port}` });
 
     await lock.init();
+
+    // Per-nozzle booking guards replace the one-booking-per-slot ones before
+    // anything is scheduled (services/core/schedulingIndexes.js).
+    try {
+      await require("./services/core/schedulingIndexes").ensureSchedulingIndexes();
+    } catch (err) {
+      logger.child("mongodb").error("Could not update the booking indexes", { err });
+    }
 
     // Fills in progress when the server stopped: re-arm each completion from
     // its stored start time (an overdue one completes now), and hand a free
@@ -93,26 +140,28 @@ function startServer(port, retriesLeft) {
     try {
       const r = await require("./services/queue/serviceTimer").recoverServiceTimers();
       if (r.serving || r.started) {
-        console.log(`[serviceTimer] recovered ${r.scheduled} fill(s) in progress (${r.overdue} overdue), started ${r.started} waiting car(s)`);
+        logger.child("serviceTimer").info("Recovered fills in progress", { scheduled: r.scheduled, overdue: r.overdue, started: r.started });
       }
     } catch (err) {
-      console.error("[serviceTimer] recovery failed:", err.message);
+      logger.child("serviceTimer").error("Recovery failed", { err });
     }
 
     // In-memory waitlists do not survive a restart; rebuild them from the
     // Booking rows that are the actual source of truth.
     try {
       const restored = await bookingService.restoreWaitlists();
-      if (restored) console.log(`Restored ${restored} waitlisted booking(s)`);
+      if (restored) logger.child("booking").info("Restored waitlisted bookings", { count: restored });
     } catch (err) {
-      console.error("Failed to restore waitlists:", err.message);
+      logger.child("booking").error("Failed to restore waitlists", { err });
     }
 
     // Background jobs: recalibrate the Erlang-C inputs from real bookings,
     // and close out slots time has already passed. Both are idempotent and
     // safe to run on an interval for the life of the process.
     startStationMetricsJob({ intervalMs: 15 * 60_000 });
-    startBookingSweepJob({ intervalMs: 10 * 60_000, getIo: () => io });
+    // Every minute: a customer who has not arrived by the end of their slot is
+    // cancelled promptly (services/booking/bookingSweep.js).
+    startBookingSweepJob({ intervalMs: 60_000, getIo: () => io });
     // Fast-cadence: auto-completes a "serving" booking once its fuel-specific
     // duration has elapsed (5 min CNG, 40s Petrol/Diesel) -- see
     // services/booking/bookingSweep.js's sweepInProgressBookings for why this needs
@@ -128,18 +177,57 @@ function startServer(port, retriesLeft) {
     // enforcement -- which is why an hour is a perfectly good cadence. It
     // cannot be a Mongo TTL index: TTL deletes documents, and the document
     // here is the vendor's whole user account (see models/User.js).
+    const codeLog = logger.child("secretCode");
     const runSecretCodeSweep = async () => {
       try {
         const cleared = await vendorSecretCode.sweepExpired(User);
-        if (cleared) console.log(`[secretCode] cleared ${cleared} expired code(s)`);
+        if (cleared) codeLog.info("Cleared expired codes", { count: cleared });
       } catch (err) {
-        console.error("[secretCode] sweep failed:", err.message);
+        codeLog.error("Sweep failed", { err });
       }
     };
     runSecretCodeSweep();
     const secretCodeTimer = setInterval(runSecretCodeSweep, 60 * 60_000);
     if (typeof secretCodeTimer.unref === "function") secretCodeTimer.unref();
+
+    log.info("Ready");
   });
 }
+
+/**
+ * Graceful shutdown on Ctrl+C / SIGTERM (a deploy or container stop): stop
+ * accepting connections, close sockets, Redis and MongoDB, then exit. A
+ * second signal, or 10 seconds without finishing, forces the exit.
+ */
+let stopping = false;
+async function shutdown(signal) {
+  if (stopping) {
+    log.warn("Second signal; forcing exit", { signal });
+    process.exit(1);
+  }
+  stopping = true;
+  log.info("Shutting down", { signal });
+  const force = setTimeout(() => {
+    log.error("Shutdown timed out; forcing exit");
+    process.exit(1);
+  }, 10_000);
+  force.unref();
+
+  try {
+    if (running) {
+      running.io.close();
+      await new Promise((resolve) => running.server.close(() => resolve()));
+    }
+    await Promise.allSettled([lock.close(), require("./services/security/rateLimiter").close()]);
+    await mongoose.disconnect();
+    log.info("Shutdown complete");
+    process.exit(0);
+  } catch (err) {
+    log.error("Shutdown failed", { err });
+    process.exit(1);
+  }
+}
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
 startServer(DEFAULT_PORT, MAX_RETRIES);

@@ -10,11 +10,11 @@ interface StationState {
   selected: UiStation | null;
   loading: boolean;
   error: string | null;
-  /** "all" | "petrol" | "cng" -- the Vanilla state.searchFilter, unchanged. */
-  filter: "all" | "petrol" | "cng";
+  /** "all" | "petrol" | "diesel" | "cng" -- the Vanilla state.searchFilter, unchanged. */
+  filter: "all" | "petrol" | "diesel" | "cng";
 
   load: () => Promise<void>;
-  setFilter: (filter: "all" | "petrol" | "cng") => void;
+  setFilter: (filter: "all" | "petrol" | "diesel" | "cng") => void;
   setStations: (stations: UiStation[]) => void;
   setSelected: (station: UiStation | null) => void;
   /**

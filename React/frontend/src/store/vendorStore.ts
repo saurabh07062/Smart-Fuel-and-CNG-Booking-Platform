@@ -129,7 +129,8 @@ export const useVendorStore = create<VendorState>((set, get) => ({
           // whenever Employees was opened before Stations.
           set({
             employees: await api.fetchVendorEmployees(),
-            stations: get().stations.length ? get().stations : await api.fetchVendorStations(),
+            // Fresh, so a station added or removed on another tab is in the dropdown.
+            stations: await api.fetchVendorStations(),
           });
           break;
         case "customers":

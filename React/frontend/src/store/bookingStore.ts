@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Booking } from "@/types";
 import { fetchMyBookings } from "@/services/api/bookingApi";
 import { isNewer } from "@/services/socket/socket";
+import { useAuthStore } from "./authStore";
 
 interface BookingState {
   bookings: Booking[];
@@ -18,7 +19,13 @@ interface BookingState {
   clear: () => void;
 }
 
-const idOf = (b: { _id?: string; id?: string } | null | undefined) => String(b?._id ?? b?.id ?? "");
+/** Customer-only data is fetched only for a signed-in customer. */
+export function isSignedInCustomer(): boolean {
+  const { isAuthenticated, user } = useAuthStore.getState();
+  return isAuthenticated && user?.role === "customer";
+}
+
+const idOf =(b: { _id?: string; id?: string } | null | undefined) => String(b?._id ?? b?.id ?? "");
 
 export const useBookingStore = create<BookingState>((set) => ({
   bookings: [],
@@ -27,6 +34,11 @@ export const useBookingStore = create<BookingState>((set) => ({
   showAll: false,
 
   load: async () => {
+    // A customer's own bookings. The app-wide live-update wiring calls this on
+    // every booking event and reconnect -- which vendors, admins and signed-out
+    // visitors also receive -- and asking then only produced 403/401s
+    // (/api/customer/bookings is customer-only). Nothing to load for them.
+    if (!isSignedInCustomer()) return;
     set({ loading: true, error: null });
     try {
       const bookings = await fetchMyBookings();

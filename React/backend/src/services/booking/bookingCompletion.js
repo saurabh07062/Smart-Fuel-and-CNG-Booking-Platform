@@ -56,6 +56,14 @@ async function completeBooking({ bookingId, fromStatuses = COMPLETABLE_STATUSES,
     metrics.inc("inventory_deduction_error_count");
     console.error(`[completion] booking ${before._id} completed but stock was not deducted:`, err.message);
   }
+  // Every completion path issues the invoice here, once. Failure does not undo
+  // the completion: the invoice is issued on first open instead.
+  try {
+    await require("../invoice/invoiceService").ensureInvoice(completed._id);
+  } catch (err) {
+    metrics.inc("invoice_issue_error_count");
+    console.error(`[completion] booking ${before._id} completed but its invoice was not issued:`, err.message);
+  }
   return completed;
 }
 

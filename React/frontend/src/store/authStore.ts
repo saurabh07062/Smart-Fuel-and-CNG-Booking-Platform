@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { User } from "@/types";
 import { configureSession } from "@/services/api/apiClient";
 import { logoutRequest } from "@/services/api/authApi";
@@ -29,6 +29,8 @@ function clearSessionStores() {
   void import("./bookingStore").then((m) => m.useBookingStore.getState().clear());
   void import("./notificationStore").then((m) => m.useNotificationStore.getState().clear());
   void import("./bookingDraftStore").then((m) => m.useBookingDraftStore.getState().reset());
+  // The next person must set their own location before choosing a fuel.
+  void import("./locationStore").then((m) => m.useLocationStore.getState().resetSession());
 }
 
 /**
@@ -49,6 +51,8 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
 
       login: (user) => {
+        // Every sign-in starts with "Use my location", then the fuel question.
+        void import("./locationStore").then((m) => m.useLocationStore.getState().resetSession());
         set({ user, isAuthenticated: true });
         reconnectSocket();
       },
@@ -80,6 +84,9 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: "fm-auth",
+      // Per tab (sessionStorage): each tab can be signed in as a different
+      // account (utils/tabId.ts, backend services/security/session.js).
+      storage: createJSONStorage(() => sessionStorage),
       // Only the profile is persisted -- it is not a credential. Whether the
       // session is still valid is asked of the server on every start
       // (hooks/useAuthBoot.ts), because the cookies cannot be read here.
@@ -94,3 +101,11 @@ configureSession({
   isSignedIn: () => useAuthStore.getState().isAuthenticated,
   onExpired: () => useAuthStore.getState().endSession(),
 });
+
+
+// The profile used to be kept in localStorage, shared by every tab.
+try {
+  localStorage.removeItem("fm-auth");
+} catch {
+  /* storage blocked */
+}

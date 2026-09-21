@@ -90,16 +90,17 @@ async function recordFailedPayment({ orderId, reason }) {
  *
  * @returns {Promise<{outcome: "collected"|"already_paid"|"not_found"|"not_pay_at_station"|"not_collectable", booking?: object}>}
  */
-async function recordStationCollection({ bookingId, stationId = null, collectedBy = null, now = new Date() }) {
+async function recordStationCollection({ bookingId, stationId = null, collectedBy = null, method = null, now = new Date() }) {
   const scope = { _id: bookingId, ...(stationId ? { station: stationId } : {}) };
   const booking = await Booking.findOneAndUpdate(
     {
       ...scope,
       payMethod: "station",
       paymentStatus: "due_at_station",
-      status: { $in: ["serving", "completed"] },
+      // At the pump: checked in (waiting for the nozzle), fueling, or done.
+      $or: [{ status: { $in: ["serving", "completed"] } }, { status: "upcoming", arrivalTime: { $ne: null } }],
     },
-    { $set: { paymentStatus: "paid", collectedBy, collectedAt: now } },
+    { $set: { paymentStatus: "paid", collectedBy, collectedAt: now, collectionMethod: method } },
     { returnDocument: "after" },
   );
   if (booking) return { outcome: "collected", booking };

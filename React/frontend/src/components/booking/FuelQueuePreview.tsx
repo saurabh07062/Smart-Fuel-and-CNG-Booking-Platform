@@ -4,6 +4,7 @@ import { toApiError } from "@/services/api/apiClient";
 import { useResync, useSocketEvent, useWatchStation } from "@/hooks/useSocket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { coalesce } from "@/utils/coalesce";
+import { useStationStore } from "@/store/stationStore";
 
 interface Props {
   stationId: string | null | undefined;
@@ -11,6 +12,27 @@ interface Props {
   quantity: number;
   date?: string | null;
   timeSlot?: string | null;
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * How this fuel's nozzles are shared, from the station's own setup:
+ * "Diesel has a dedicated nozzle for online bookings and a separate nozzle for walk-in customers."
+ */
+export function nozzleNote(fuel: string, setup?: { total: number; online: number } | null): string {
+  if (!setup || !(setup.total > 0)) return `${fuel} has its own nozzle, shared by online bookings and walk-in customers.`;
+  const online = Math.max(0, Math.min(setup.online, setup.total));
+  const walkIn = setup.total - online;
+  if (online > 0 && walkIn > 0) {
+    const a = online === 1 ? "a dedicated nozzle" : `${online} dedicated nozzles`;
+    const b = walkIn === 1 ? "a separate nozzle" : `${walkIn} separate nozzles`;
+    return `${fuel} has ${a} for online bookings and ${b} for walk-in customers.`;
+  }
+  if (online === 0) return `${fuel} nozzles currently serve walk-in customers only.`;
+  return setup.total === 1
+    ? `${fuel} has one nozzle, shared by online bookings and walk-in customers.`
+    : `${fuel} has ${plural(setup.total, "nozzle")}, shared by online bookings and walk-in customers.`;
 }
 
 /** 72 -> "1 min 12 sec", 40 -> "40 sec". */
@@ -55,6 +77,12 @@ type StationPayload = Partial<Record<(typeof STATION_KEYS)[number], string>>;
  */
 export default function FuelQueuePreview({ stationId, fuelType, quantity, date = null, timeSlot = null }: Props) {
   const [data, setData] = useState<QueuePreview | null>(null);
+  // This fuel's nozzle setup (online / walk-in), from the station's public data.
+  const nozzles = useStationStore((st) => {
+    const station = st.stations.find((x) => x.id === String(stationId));
+    const key = String(fuelType ?? "").toLowerCase() as "petrol" | "diesel" | "cng";
+    return station?.nozzleConfig?.[key] ?? null;
+  });
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(() => Date.now());
   /** Server clock minus browser clock, from the last response. */
@@ -191,6 +219,14 @@ export default function FuelQueuePreview({ stationId, fuelType, quantity, date =
             : "Nozzle free",
         )}
         {fact("Queue ahead", `${you.vehiclesAhead} vehicle${you.vehiclesAhead === 1 ? "" : "s"}`)}
+        {data.schedule &&
+          fact(
+            "Places left in this slot",
+            data.schedule.resourceAvailable
+              ? `${data.schedule.availableCapacity} of ${data.schedule.totalCapacity}${data.schedule.resources > 1 ? ` · ${data.schedule.resources} nozzles` : ""}`
+              : "Full: join the waitlist",
+            true,
+          )}
         {fact(
           "Estimated wait",
           reserved
@@ -248,8 +284,8 @@ export default function FuelQueuePreview({ stationId, fuelType, quantity, date =
       )}
 
       <p className="text-[11px] mt-3" style={{ color: "var(--muted)" }}>
-        From live bookings and walk-ins on this station&apos;s {data.fuelType} nozzle. Other fuels have their own nozzles.
-        Each vehicle&apos;s time comes from its quantity. Updates automatically.
+        {nozzleNote(data.fuelType, nozzles)} Wait times are based on each vehicle&apos;s fuel quantity, and the queue
+        updates automatically in real time.
       </p>
     </>,
   );

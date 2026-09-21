@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import L from "leaflet";
 import type { Coordinates } from "@/types";
 import { useLeafletMap } from "@/hooks/useLeafletMap";
+import { useAccentColor } from "./mapTheme";
 
 interface Props {
   from: Coordinates;
@@ -28,6 +29,8 @@ const marker = (bg: string, icon: string, shadow: string) =>
  * defence-in-depth check.
  */
 export default function RouteMap({ from, to, stationName }: Props) {
+  // The route line follows the app colour (red or green).
+  const routeColor = useAccentColor();
   const { containerRef, mapRef, ready } = useLeafletMap({
     center: [from.lat, from.lng],
     zoom: 14,
@@ -55,7 +58,7 @@ export default function RouteMap({ from, to, stationName }: Props) {
         [from.lat, from.lng],
         [to.lat, to.lng],
       ],
-      { color: "#e23744", weight: 4, dashArray: "8, 8", opacity: 0.85 },
+      { color: routeColor, weight: 4, dashArray: "8, 8", opacity: 0.85 },
     ).addTo(map);
 
     map.fitBounds(line.getBounds(), { padding: [30, 30] });
@@ -65,7 +68,7 @@ export default function RouteMap({ from, to, stationName }: Props) {
       map.removeLayer(pumpMarker);
       map.removeLayer(line);
     };
-  }, [ready, mapRef, from.lat, from.lng, to.lat, to.lng, stationName]);
+  }, [ready, mapRef, from.lat, from.lng, to.lat, to.lng, stationName, routeColor]);
 
   return (
     <div className="mt-4 mb-3">

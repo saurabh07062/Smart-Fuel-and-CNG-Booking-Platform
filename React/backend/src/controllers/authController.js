@@ -21,6 +21,8 @@ function sessionUserView(user) {
     // those two states to different pages, so both have to come back.
     vendorCode: user.vendorCode,
     activated: user.activated,
+    // The fuels a vendor sells: the vendor panel shows only these.
+    vendorFuelTypes: user.vendorFuelTypes,
     wallet: user.wallet,
     rewards: user.rewards,
     vehicles: user.vehicles,
@@ -34,7 +36,13 @@ const crypto = require("crypto");
 const emailService = require("../services/notification/emailService");
 const { validateEmail } = require("../services/notification/emailValidation");
 const passwordReset = require("../services/security/passwordReset");
-const { normaliseEmail, emailLookup } = require("../utils/email");
+const { normaliseEmail, findUserByEmail } = require("../utils/email");
+const authLog = require("../utils/logger").child("auth");
+
+/** "app" when the request comes from the FuelMart Android app (its WebView names the app package). */
+function clientKind(req) {
+  return req.get("x-requested-with") === "com.fuelmart.customer" ? "app" : "website";
+}
 
 // Initialize the centralized SMTP transporter on startup
 emailService.initTransporter();
@@ -64,7 +72,7 @@ exports.register = async (req, res) => {
     }
 
     console.log(`[Register] Checking if email exists: ${email}`);
-    let user = await User.findOne(emailLookup(email));
+    let user = await findUserByEmail(email);
     if (user) {
       console.log(`[Register] ❌ Email already registered: ${email}`);
       return res.status(400).json({ msg: `User already exists with email: ${email}` });
@@ -91,7 +99,7 @@ exports.register = async (req, res) => {
     if (err.code === 11000) {
       return res.status(400).json({ msg: "An account with this email already exists." });
     }
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Could not create the account. Please try again." });
   }
 };
 
@@ -99,7 +107,7 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
     // Case and surrounding spaces do not matter: "Saurabh@Gmail.com " is the same account.
-    const user = await User.findOne(emailLookup(email));
+    const user = await findUserByEmail(email);
     if (!user || typeof password !== "string") return res.status(400).json({ msg: "Invalid Credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -109,6 +117,8 @@ exports.login = async (req, res) => {
 
     // Session cookies only; synchronous signing inside this try (see register).
     await issueSession(req, res, user);
+    // One line per sign-in (email masked by the logger).
+    authLog.info(`Signed in: ${user.role} via ${clientKind(req)}`, { userId: String(user._id), email: user.email, role: user.role, client: clientKind(req), ip: req.ip });
     res.json({ user: sessionUserView(user) });
   } catch (err) {
     console.error(err.message);
@@ -128,7 +138,12 @@ exports.refresh = async (req, res) => {
     res.json({ user: sessionUserView(user) });
   } catch (err) {
     if (err instanceof SessionError) {
-      if (err.reason !== "REFRESH_IN_PROGRESS") clearSessionCookies(res);
+      // A new tab only asking whether this browser is signed in (X-FM-Adopt):
+      // "nobody is" is an answer, not an error.
+      if (err.reason === "NO_REFRESH_TOKEN" && req.get("x-fm-adopt") === "1") {
+        return res.json({ user: null });
+      }
+      if (err.reason !== "REFRESH_IN_PROGRESS") clearSessionCookies(res, req);
       return res.status(err.status).json({ msg: err.message, reason: err.reason });
     }
     console.error("[auth] refresh failed:", err.message);
@@ -145,7 +160,7 @@ exports.logout = async (req, res) => {
     await revokeCurrentSession(req, res);
   } catch (err) {
     console.error("[auth] logout could not revoke the session:", err.message);
-    clearSessionCookies(res);
+    clearSessionCookies(res, req);
   }
   res.json({ msg: "Signed out" });
 };
@@ -158,7 +173,7 @@ exports.logout = async (req, res) => {
 exports.logoutAll = async (req, res) => {
   try {
     await revokeAllSessions(req.user.id);
-    clearSessionCookies(res);
+    clearSessionCookies(res, req);
     res.json({ msg: "Signed out on every device" });
   } catch (err) {
     console.error("[auth] logout-all failed:", err.message);
@@ -204,7 +219,7 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ msg: passwordReset.INVALID_TOKEN_MSG, reason: "INVALID_RESET_TOKEN" });
     }
     // This browser's session (if any) belonged to the old password too.
-    clearSessionCookies(res);
+    clearSessionCookies(res, req);
     res.json({ msg: "Your password has been reset. Please sign in with your new password." });
   } catch (err) {
     console.error("[auth] reset-password failed:", err.message);
@@ -236,19 +251,25 @@ exports.verifyEmail = async (req, res) => {
 };
 
 exports.resendVerification = async (req, res) => {
+  // The same reply whether or not the address has an unverified account, so
+  // this endpoint cannot be used to find out who is registered.
+  const reply = { msg: "If that email has an account waiting for verification, a new link has been sent." };
   try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ msg: "User not found" });
-    if (user.isVerified) return res.status(400).json({ msg: "User already verified" });
+    // A plain string only: an object such as {"$ne": null} must never reach
+    // the query as an operator.
+    const email = normaliseEmail(req.body?.email);
+    if (!email) return res.status(400).json({ msg: "Enter your email address." });
+    const user = await findUserByEmail(email);
+    if (!user || user.isVerified) return res.json(reply);
 
     const verificationToken = crypto.randomBytes(20).toString("hex");
     user.verificationToken = verificationToken;
     await user.save();
 
-    await emailService.sendVerificationEmail(email, verificationToken);
-    res.json({ msg: "Verification email resent" });
+    await emailService.sendVerificationEmail(user.email, verificationToken);
+    res.json(reply);
   } catch (err) {
+    console.error("[resendVerification]", err.message);
     res.status(500).json({ msg: "Server error" });
   }
 };

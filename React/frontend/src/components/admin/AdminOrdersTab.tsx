@@ -104,6 +104,24 @@ export default function AdminOrdersTab() {
     }
   };
 
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const deleteOrder = async (b: AdminOrder) => {
+    const paidNote = b.paymentStatus === "paid" ? " Its payment will no longer count in revenue." : "";
+    if (!window.confirm(`Delete order ${b.orderId}? This cannot be undone.${paidNote}`)) return;
+    setDeleting(b.bookingId);
+    try {
+      const r = await api.deleteAdminOrder(b.bookingId);
+      pushToast(r.msg || "Order deleted", "success");
+      if (detail?.bookingId === b.bookingId) setDetail(null);
+      await loadOrders();
+    } catch (err) {
+      pushToast(toApiError(err).msg, "error");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   if (orders === null) return <ConsoleLoading label="Loading orders..." />;
 
   const s = orders.summary ?? {};
@@ -323,6 +341,20 @@ export default function AdminOrdersTab() {
                                 </option>
                               ))}
                             </select>
+                            {api.DELETABLE_ORDER_STATUSES.includes(b.status) && (
+                              <button
+                                onClick={() => void deleteOrder(b)}
+                                disabled={deleting === b.bookingId}
+                                className="vm-icon-btn text-red-400 hover:bg-red-600 disabled:opacity-50"
+                                title="Delete Order"
+                                aria-label={`Delete order ${b.orderId}`}
+                              >
+                                <i
+                                  className={`fas ${deleting === b.bookingId ? "fa-spinner fa-spin" : "fa-trash"} text-xs`}
+                                  aria-hidden
+                                />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

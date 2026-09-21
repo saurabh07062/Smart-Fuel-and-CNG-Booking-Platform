@@ -42,10 +42,10 @@ const dayNameOf = (date) => DAY_NAMES[clockParts(atBusinessTime(date, 12, 0)).da
 // Pure
 // ---------------------------------------------------------------------------
 
-test("slot labels: 6:00 AM to 9:30 PM, 30 minutes apart", () => {
-  assert.equal(BOOKABLE_SLOT_LABELS.length, 32);
-  assert.equal(BOOKABLE_SLOT_LABELS[0], "6:00 AM");
-  assert.equal(BOOKABLE_SLOT_LABELS[31], "9:30 PM");
+test("slot labels: the whole day, 12:00 AM to 11:30 PM, 30 minutes apart", () => {
+  assert.equal(BOOKABLE_SLOT_LABELS.length, 48);
+  assert.equal(BOOKABLE_SLOT_LABELS[0], "12:00 AM");
+  assert.equal(BOOKABLE_SLOT_LABELS[47], "11:30 PM");
   assert.equal(SLOT_SPACING_SECONDS, 1800);
 });
 
@@ -138,21 +138,8 @@ test("slot model against MongoDB", async (t) => {
     isVerified: true,
   });
 
-  const start = nozzleScheduler.parseStartDateTime(DATE, "10:00 AM");
-  const w = nozzleScheduler.computeWindow("Petrol", start);
-  await Booking.create({
-    user: new mongoose.Types.ObjectId(),
-    station: station._id,
-    fuelType: "Petrol",
-    quantity: 5,
-    price: 100,
-    amount: 505,
-    bookingDate: DATE,
-    timeSlot: "10:00 AM",
-    bookingStartTime: w.start,
-    bookingEndTime: w.end,
-    status: "upcoming",
-  });
+  // 10:00 AM is fully booked on the Petrol nozzle: 45 back-to-back 40 s fills.
+  await require("./helpers/fillWindow").fillWindow({ stationId: station._id, fuelType: "Petrol", date: DATE, label: "10:00 AM" });
 
   const call = async (fn, query) => {
     const res = {
@@ -169,12 +156,14 @@ test("slot model against MongoDB", async (t) => {
       const now = atBusinessTime(DATE, 9, 15);
       const rows = await nozzleScheduler.generateAvailability(station._id, "petrol", DATE, { station, now });
       const by = Object.fromEntries(rows.map((r) => [r.label, r]));
-      assert.equal(rows.length, 32);
+      assert.equal(rows.length, 48);
       assert.equal(by["7:30 AM"].reason, "PASSED");
       assert.equal(by["8:30 AM"].reason, "PASSED");
       assert.equal(by["9:00 AM"].reason, null, "9:00 AM is still inside its slot at 9:15");
       assert.equal(by["10:00 AM"].reason, "RESERVED");
+      assert.deepEqual({ ...by["10:00 AM"].capacity }, { total: 45, available: 0, reserved: 45, resources: 1 });
       assert.equal(by["10:30 AM"].bookable, true);
+      assert.equal(by["10:30 AM"].capacity.available, 45);
       assert.equal(by["8:00 PM"].reason, "CLOSED");
       assert.equal(by["9:30 PM"].withinHours, false);
       assert.equal(by["10:30 AM"].durationSeconds, 40);

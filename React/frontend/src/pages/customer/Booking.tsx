@@ -15,7 +15,8 @@ import { useBookingStore } from "@/store/bookingStore";
 import { useBookingDraftStore } from "@/store/bookingDraftStore";
 import { useStationStore } from "@/store/stationStore";
 import { pushToast } from "@/store/toastStore";
-import { createBooking, fetchAvailability } from "@/services/api/bookingApi";
+import { cancelBooking, createBooking, fetchAvailability } from "@/services/api/bookingApi";
+import CancelBookingSheet from "@/components/booking/CancelBookingSheet";
 import { useResync, useSocketEvent, useWatchStation } from "@/hooks/useSocket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { coalesce } from "@/utils/coalesce";
@@ -72,7 +73,9 @@ export default function Booking() {
 
   useEffect(() => {
     void loadBookings();
-    if (stations.length === 0) void loadStations();
+    // Always refetch: the list on screen stays while the fresh one loads, so
+    // navigating back here never shows prices or stations from earlier.
+    void loadStations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -148,6 +151,35 @@ export default function Booking() {
           !isSlotElapsed(b.bookingDate, b.timeSlot),
       ),
     [bookings],
+  );
+
+  // "Cancel & rebook" from the one-booking notice: cancel the current booking
+  // (with the usual confirmation), then this page carries on as a new booking.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const cancelAndRebook = async (reason?: string) => {
+    const current = activeBookings[0];
+    if (!current) return;
+    setCancelBusy(true);
+    try {
+      await cancelBooking(String(current._id), reason);
+      pushToast("Booking cancelled. Choose your new slot.", "success");
+      setCancelOpen(false);
+      await loadBookings();
+    } catch (err) {
+      pushToast(toApiError(err).msg, "error");
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+  const cancelSheet = (
+    <CancelBookingSheet
+      open={cancelOpen}
+      waitlisted={activeBookings[0]?.status === "waitlisted"}
+      busy={cancelBusy}
+      onClose={() => setCancelOpen(false)}
+      onConfirm={(reason) => void cancelAndRebook(reason)}
+    />
   );
 
   /**
@@ -318,31 +350,41 @@ export default function Booking() {
   };
 
   if (activeBookings.length > 0) {
+    const current = activeBookings[0];
+    const currentStation = stations.find((x) => x.id === String(typeof current.station === "object" ? current.station?._id : current.station));
+    const serving = current.status === "serving";
     return (
       <Layout bare>
         <div className="cx max-w-xl mx-auto pt-10 md:pt-16">
-          <div className="cx-panel text-center" style={{ animation: "slideUp .3s ease" }}>
-            <div className="cx-panel-body" style={{ padding: "36px 24px" }}>
-              <div
-                className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
-                style={{ background: "var(--status-warn-bg)", border: "1px solid var(--status-warn)" }}
-              >
-                <i className="fas fa-triangle-exclamation text-2xl" style={{ color: "var(--status-warn)" }} aria-hidden />
+          {cancelSheet}
+          <div className="cx-panel" style={{ animation: "slideUp .3s ease" }}>
+            <div className="cx-panel-body" style={{ padding: "28px 24px" }}>
+              <div className="flex items-center gap-3 mb-4">
+                <span className="cx-stat-icon cx-tone-blue" style={{ width: 44, height: 44 }}>
+                  <i className="fas fa-calendar-check" aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="cx-title" style={{ fontSize: 20 }}>You already have a booking</h2>
+                  <p className="text-[13px]" style={{ color: "var(--muted)" }}>One booking at a time keeps slots fair for everyone.</p>
+                </div>
               </div>
-              <h2 className="cx-title mb-2">Active Booking Exists</h2>
-              <p className="text-sm mb-6 max-w-sm mx-auto" style={{ color: "var(--muted)" }}>
-                You already have an active fuel booking. You are allowed only one booking at a time.
-                Please complete or cancel your current booking before making a new one.
-              </p>
-              <div className="flex justify-center gap-2 flex-wrap">
-                <button
-                  className="btn btn-outline"
-                  onClick={() => navigate(`/confirmation/${activeBookings[0]._id}`)}
-                >
-                  <i className="fas fa-qrcode" aria-hidden /> View Booking
+              <div className="rounded-xl p-3.5 mb-5" style={{ background: "var(--bg2)", border: "1px solid var(--border)" }}>
+                <p className="font-bold text-[14px] truncate">{currentStation?.name ?? "Your station"}</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
+                  {current.bookingDate} · {current.timeSlot} · {current.fuelType}
+                  {typeof current.quantity === "number" ? ` · ${current.quantity} L` : ""}
+                </p>
+                <span className="cx-tag is-green mt-2 inline-block">
+                  {serving ? "Fueling now" : current.status === "waitlisted" ? "On the waitlist" : "Upcoming"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="btn btn-primary btn-block" onClick={() => navigate(`/confirmation/${current._id}`)}>
+                  <i className="fas fa-qrcode" aria-hidden /> View booking
                 </button>
-                <button className="btn btn-primary" onClick={() => navigate("/dashboard")}>
-                  <i className="fas fa-home" aria-hidden /> Back to Dashboard
+                {/* A booking already being fueled cannot be cancelled. */}
+                <button className="btn btn-outline btn-block" disabled={serving} onClick={() => setCancelOpen(true)}>
+                  <i className="fas fa-rotate" aria-hidden /> Cancel &amp; rebook
                 </button>
               </div>
             </div>

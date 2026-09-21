@@ -96,10 +96,10 @@ const OVERLOAD_WAIT_MINUTES = 120;
  * With c nozzles the queue drains in batches of c, so the person at 0-based
  * index `position` waits for floor(position / c) service rounds.
  *
- *   waitMinutes = floor(position / c) * avgServiceMinutes
+ *   waitMinutes = inServiceMinutesRemaining + floor(position / c) * avgServiceMinutes
  *
  * `inServiceMinutesRemaining` optionally accounts for the vehicles already at
- * the pump partway through filling.
+ * the pump partway through filling: the next nozzle frees when they finish.
  */
 function etaForPosition({
   position,
@@ -114,9 +114,9 @@ function etaForPosition({
   const rounds = Math.floor(pos / c);
   const remaining = Math.max(0, numOr(inServiceMinutesRemaining, 0));
 
-  // The first round is shortened by however far along the current fills are.
-  const base = rounds * svc;
-  return round1(rounds > 0 ? base - Math.min(remaining, svc) + remaining : remaining);
+  // The first nozzle frees once the fill in progress ends (`remaining`); each
+  // full batch of c vehicles ahead adds one more fill after that.
+  return round1(remaining + rounds * svc);
 }
 
 /**

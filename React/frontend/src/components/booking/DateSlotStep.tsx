@@ -7,6 +7,7 @@ import { isSlotElapsed } from "@/utils/format";
 import { istDateKey } from "@/utils/businessTime";
 import type { SlotAvailability } from "@/types/booking";
 import FuelQueuePreview from "./FuelQueuePreview";
+import { ADVANCE_BOOKING_DAYS } from "@/constants/booking";
 
 interface Props {
   station: UiStation;
@@ -76,7 +77,9 @@ export default function DateSlotStep({ station: s }: Props) {
     const a = availability;
     const matches =
       a && String(a.stationId) === String(s.id) && a.fuelType === draft.fuelType && a.date === dateVal;
-    if (matches && a.slots.length > 0) return a.slots;
+    // Times the station is closed are left out: the list runs round the
+    // clock, and only a 24-hour station is open for all of it.
+    if (matches && a.slots.length > 0) return a.slots.filter((r) => r.reason !== "CLOSED");
     return TIME_SLOTS.map((label) => ({
       label,
       start: null,
@@ -87,6 +90,21 @@ export default function DateSlotStep({ station: s }: Props) {
       reason: null,
     }));
   }, [availability, s.id, draft.fuelType, dateVal]);
+
+  // Nothing chosen yet: preselect the earliest slot that can be booked, once
+  // the server's rows for this station, fuel and date are in.
+  const serverRowsReady =
+    !!availability &&
+    String(availability.stationId) === String(s.id) &&
+    availability.fuelType === draft.fuelType &&
+    availability.date === dateVal &&
+    availability.slots.length > 0;
+  const earliest = serverRowsReady
+    ? slotRows.find((r) => (r.bookable ?? r.available) && !r.reason && !isSlotElapsed(dateVal, r.label))?.label ?? null
+    : null;
+  useEffect(() => {
+    if (!draft.timeSlot && earliest) patch({ timeSlot: earliest });
+  }, [draft.timeSlot, earliest, patch]);
 
   const selectedRow = slotRows.find((r) => r.label === draft.timeSlot);
   const selectedFull = !!selectedRow && selectedRow.reason === "RESERVED" && !isSlotElapsed(dateVal, selectedRow.label);
@@ -103,8 +121,8 @@ export default function DateSlotStep({ station: s }: Props) {
             <span className="cx-section-num">1</span> Select date
           </h3>
         </div>
-        <div className="grid grid-cols-4 gap-2 sm:gap-3">
-          {[0, 1, 2, 3].map((d) => {
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          {Array.from({ length: ADVANCE_BOOKING_DAYS + 1 }, (_, d) => d).map((d) => {
             const ds = dateKey(d);
             // Midnight UTC of the India date, formatted in UTC, so the day and
             // weekday shown are the India date's whatever the browser zone.
@@ -197,6 +215,10 @@ export default function DateSlotStep({ station: s }: Props) {
               );
             }
             const selected = draft.timeSlot === t;
+            const left = row.capacity?.available;
+            // Only worth mentioning when few places remain.
+            const total = row.capacity?.total ?? 0;
+            const fillingFast = left != null && total > 0 && left <= Math.max(3, Math.ceil(total * 0.2));
             return (
               <button
                 key={t}
@@ -204,8 +226,14 @@ export default function DateSlotStep({ station: s }: Props) {
                 className={`cx-slot ${selected ? "is-selected" : ""}`}
                 onClick={() => patch({ timeSlot: t })}
                 aria-pressed={selected}
+                title={left != null ? `${left} of ${row.capacity?.total} places left` : undefined}
               >
                 {t}
+                {fillingFast && (
+                  <span className="block text-[10px] font-semibold" style={{ color: "var(--status-warn)" }}>
+                    Filling fast · {left} left
+                  </span>
+                )}
               </button>
             );
           })}

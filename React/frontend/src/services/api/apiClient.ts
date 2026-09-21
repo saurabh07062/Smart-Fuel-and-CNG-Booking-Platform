@@ -1,5 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import type { ApiError } from "@/types";
+import { recordServerDate } from "@/utils/serverClock";
+import { TAB_HEADER, tabId } from "@/utils/tabId";
 
 /**
  * The single Axios instance every API module uses.
@@ -19,6 +21,16 @@ export const apiClient = axios.create({
   baseURL: "/api",
   timeout: 20000,
   withCredentials: true,
+  // Which tab this is: the server keeps a separate session per tab.
+  headers: { [TAB_HEADER]: tabId() },
+});
+
+// Keep the device's view of the server clock current (utils/serverClock.ts):
+// fueling countdowns are timed from server timestamps.
+apiClient.interceptors.response.use((response) => {
+  const date = response.headers?.date;
+  if (typeof date === "string") recordServerDate(date);
+  return response;
 });
 
 // Tokens this app kept in localStorage before sessions moved to httpOnly
@@ -44,7 +56,23 @@ export function configureSession(hooks: Partial<typeof sessionHooks>) {
 }
 
 // Refreshing must not pass through the 401 handler below.
-const sessionClient = axios.create({ baseURL: "/api", timeout: 20000, withCredentials: true });
+const sessionClient = axios.create({ baseURL: "/api", timeout: 20000, withCredentials: true, headers: { [TAB_HEADER]: tabId() } });
+
+/**
+ * A tab opened after someone signed in, in another tab, starts with that
+ * sign-in and takes its own copy of it (the server "forks" the browser's
+ * latest session for this tab). From then on, sign-ins in other tabs do not
+ * change this one. Resolves the account, or null when there is none.
+ */
+export async function adoptBrowserSession<T>(): Promise<T | null> {
+  try {
+    // X-FM-Adopt: signed out is a normal answer here ({ user: null }), not a 401.
+    const { data } = await sessionClient.post<{ user?: T | null }>("/auth/refresh", undefined, { headers: { "X-FM-Adopt": "1" } });
+    return data?.user ?? null;
+  } catch {
+    return null;
+  }
+}
 let refreshing: Promise<boolean> | null = null;
 
 /**

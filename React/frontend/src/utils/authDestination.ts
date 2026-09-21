@@ -9,11 +9,16 @@ import type { Role, User } from "@/types";
  * signed out, expired, or simply pressing Back onto /vendor after logging
  * out -- landed on the customer login instead of the vendor secret-code page.
  */
-export const LOGIN_PATHS: Record<Role, string> = {
-  customer: "/login",
-  vendor: "/vendor/secret-code",
-  admin: "/admin/login",
-};
+/** The customer app build (VITE_APP_MODE=customer) has only the customer sign-in. */
+const CUSTOMER_APP = import.meta.env.VITE_APP_MODE === "customer";
+
+export const LOGIN_PATHS: Record<Role, string> = CUSTOMER_APP
+  ? { customer: "/login", vendor: "/login", admin: "/login" }
+  : {
+      customer: "/login",
+      vendor: "/vendor/secret-code",
+      admin: "/admin/login",
+    };
 
 /** The sign-in page for a role (logout sends each role back to its own). */
 export function loginPathForRole(role: Role | null | undefined): string {
@@ -26,6 +31,7 @@ export function loginPathForRole(role: Role | null | undefined): string {
  * everything else customer.
  */
 export function loginPathFor(pathname: string): string {
+  if (CUSTOMER_APP) return LOGIN_PATHS.customer;
   if (/^\/vendor(\/|$)/.test(pathname)) return LOGIN_PATHS.vendor;
   if (/^\/admin(\/|$)/.test(pathname)) return LOGIN_PATHS.admin;
   return LOGIN_PATHS.customer;
@@ -48,6 +54,9 @@ export function loginPathFor(pathname: string): string {
  */
 export function authDestination(user: User | null, fallback = "/dashboard"): string {
   if (!user) return "/login";
+  // The customer app has no vendor or admin area (routes/AppRoutes.tsx tells
+  // those accounts to use the website).
+  if (CUSTOMER_APP) return fallback;
 
   if (user.role === "admin") return "/admin";
 

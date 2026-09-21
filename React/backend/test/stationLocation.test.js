@@ -65,6 +65,7 @@ test("station location persistence against MongoDB", async (t) => {
         businessName: `${tag} ${suffix} Fuels`,
         phone: "9000000000",
         vendorAddress: "Location Test Road, Pune",
+        products: "petrol,diesel,cng",
         ...extra,
       },
     });
@@ -155,6 +156,139 @@ test("station location persistence against MongoDB", async (t) => {
       const doc = await Station.findById(r.body._id).lean();
       assert.equal(doc.location, undefined);
       assert.equal(doc.coordinates, undefined);
+    });
+
+    await t.test("typed coordinates out of range are refused with a reason, and nothing is created", async () => {
+      const vendor = await User.findOne({ email: `${tag}-pinned@example.com` });
+      const cases = [
+        [{ lat: 95, lng: 73.8 }, /Latitude/],
+        [{ lat: -90.5, lng: 73.8 }, /Latitude/],
+        [{ lat: 18.5, lng: 181 }, /Longitude/],
+        [{ lat: "abc", lng: 73.8 }, /Latitude/],
+        [{ lat: 18.5 }, /both latitude and longitude/],
+      ];
+      for (const [coordinates, reason] of cases) {
+        const r = await call("POST", "/api/vendor-panel/stations", {
+          token: tokenFor(vendor._id),
+          body: { name: `${tag}-badpin`, address: "Somewhere, Pune", coordinates },
+        });
+        assert.equal(r.status, 400, `${JSON.stringify(coordinates)} -> ${JSON.stringify(r.body)}`);
+        assert.match(r.body.msg, reason);
+      }
+      assert.equal(await Station.countDocuments({ name: `${tag}-badpin` }), 0);
+    });
+
+    await t.test("the vendor edits the station: details and location saved, GeoJSON follows, search finds the new spot", async () => {
+      const vendor = await User.findOne({ email: `${tag}-pinned@example.com` });
+      const r = await call("PUT", `/api/vendor-panel/stations/${stationId}`, {
+        token: tokenFor(vendor._id),
+        body: {
+          name: `${tag}-edited`,
+          address: "Nagar Road, Wagholi",
+          openingHours: "06:00-22:00",
+          fuelTypes: ["Petrol", "Diesel"],
+          coordinates: { lat: 18.580563, lng: 73.975342 },
+        },
+      });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const doc = await Station.findById(stationId).lean();
+      assert.equal(doc.name, `${tag}-edited`);
+      assert.equal(doc.address, "Nagar Road, Wagholi");
+      assert.equal(doc.openingHours, "06:00-22:00");
+      assert.deepEqual(doc.fuelTypes, ["Petrol", "Diesel"]);
+      assert.deepEqual(doc.coordinates, { lat: 18.580563, lng: 73.975342 });
+      assert.deepEqual(doc.location.coordinates, [73.975342, 18.580563], "GeoJSON location moved with the pin");
+      const near = await Station.find({
+        _id: stationId,
+        location: { $near: { $geometry: { type: "Point", coordinates: [73.975342, 18.580563] }, $maxDistance: 50 } },
+      }).lean();
+      assert.equal(near.length, 1, "found at the corrected spot");
+    });
+
+    await t.test("a form opened before the station changed cannot overwrite it (409), a current one can", async () => {
+      const vendor = await User.findOne({ email: `${tag}-pinned@example.com` });
+      const opened = (await Station.findById(stationId).lean()).updatedAt;
+
+      // Someone saves the correct location meanwhile.
+      await new Promise((r) => setTimeout(r, 5));
+      const fix = await call("PUT", `/api/vendor-panel/stations/${stationId}`, {
+        token: tokenFor(vendor._id),
+        body: { coordinates: { lat: 18.5805621, lng: 73.9753407 }, expectedUpdatedAt: opened },
+      });
+      assert.equal(fix.status, 200, JSON.stringify(fix.body));
+
+      // The stale form tries to save its old pin.
+      const stale = await call("PUT", `/api/vendor-panel/stations/${stationId}`, {
+        token: tokenFor(vendor._id),
+        body: { coordinates: { lat: 18.582535, lng: 73.975371 }, expectedUpdatedAt: opened },
+      });
+      assert.equal(stale.status, 409, JSON.stringify(stale.body));
+      assert.equal(stale.body.reason, "STALE_EDIT");
+      assert.deepEqual((await Station.findById(stationId).lean()).coordinates, { lat: 18.5805621, lng: 73.9753407 }, "the correct location survives");
+
+      await Station.updateOne({ _id: stationId }, { $set: { coordinates: { lat: 18.580563, lng: 73.975342 }, location: { type: "Point", coordinates: [73.975342, 18.580563] } } });
+    });
+
+    await t.test("an edit is refused like a new station would be, and nothing changes", async () => {
+      const vendor = await User.findOne({ email: `${tag}-pinned@example.com` });
+      const before = await Station.findById(stationId).lean();
+      const cases = [
+        [{ coordinates: { lat: 95, lng: 73.9 } }, /Latitude/],
+        [{ coordinates: { lat: 18.58 } }, /both latitude and longitude/],
+        [{ coordinates: { lat: 0, lng: 0 } }, /real location/],
+        [{ name: "   " }, /name cannot be empty/],
+        [{ fuelTypes: [] }, /Select at least one fuel/],
+      ];
+      for (const [body, reason] of cases) {
+        const r = await call("PUT", `/api/vendor-panel/stations/${stationId}`, { token: tokenFor(vendor._id), body });
+        assert.equal(r.status, 400, `${JSON.stringify(body)} -> ${JSON.stringify(r.body)}`);
+        assert.match(r.body.msg, reason);
+      }
+      const after = await Station.findById(stationId).lean();
+      assert.deepEqual(after.coordinates, before.coordinates);
+      assert.equal(after.name, before.name);
+    });
+
+    await t.test("a vendor registered for Petrol only cannot add CNG by editing", async () => {
+      const vendor = await User.findOneAndUpdate(
+        { email: `${tag}-pinned@example.com` },
+        { $set: { vendorFuelTypes: ["petrol"] } },
+        { returnDocument: "after" },
+      );
+      const r = await call("PUT", `/api/vendor-panel/stations/${stationId}`, {
+        token: tokenFor(vendor._id),
+        body: { fuelTypes: ["Petrol", "CNG"] },
+      });
+      assert.equal(r.status, 400);
+      assert.match(r.body.msg, /CNG cannot be added/);
+      await User.updateOne({ _id: vendor._id }, { $unset: { vendorFuelTypes: "" } });
+    });
+
+    await t.test("another vendor cannot edit the station", async () => {
+      const r0 = await register("intruder", { latitude: "18.5", longitude: "73.8" });
+      assert.equal(r0.status, 200, JSON.stringify(r0.body));
+      const intruder = await User.findOneAndUpdate(
+        { email: `${tag}-intruder@example.com` },
+        { $set: { vendorStatus: "active", activated: true } },
+        { returnDocument: "after" },
+      );
+      const r = await call("PUT", `/api/vendor-panel/stations/${stationId}`, {
+        token: tokenFor(intruder._id),
+        body: { coordinates: { lat: 19, lng: 72.8 } },
+      });
+      assert.equal(r.status, 404);
+      assert.deepEqual((await Station.findById(stationId).lean()).coordinates, { lat: 18.580563, lng: 73.975342 });
+    });
+
+    await t.test("the range limits themselves are accepted and stored exactly", async () => {
+      const vendor = await User.findOne({ email: `${tag}-pinned@example.com` });
+      const r = await call("POST", "/api/vendor-panel/stations", {
+        token: tokenFor(vendor._id),
+        body: { name: `${tag}-edge`, address: "Somewhere", coordinates: { lat: -89.9999999, lng: 179.9999999 } },
+      });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      const doc = await Station.findById(r.body._id).lean();
+      assert.deepEqual(doc.location.coordinates, [179.9999999, -89.9999999]);
     });
   } finally {
     await new Promise((resolve) => server.close(resolve));

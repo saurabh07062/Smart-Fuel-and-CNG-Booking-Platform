@@ -4,7 +4,11 @@ import type { Booking, UiStation } from "@/types";
 import Layout from "@/components/layout/Layout";
 import EmptyState from "@/components/common/EmptyState";
 import BookingCard from "@/components/booking/BookingCard";
+import CancelBookingSheet from "@/components/booking/CancelBookingSheet";
 import LocationPicker from "@/components/maps/LocationPicker";
+import StationsMap from "@/components/maps/StationsMap";
+import { getLastKnownUserCoords } from "@/utils/geo";
+import { directionsUrl } from "@/utils/navigation";
 import FuelSelection from "@/components/maps/FuelSelection";
 import VehicleArt from "@/components/vehicle/VehicleArt";
 import { useAuthStore } from "@/store/authStore";
@@ -24,11 +28,11 @@ const ACTIVE_STATUSES = ["upcoming", "serving", "waitlisted"];
 const VEHICLE_PREVIEW = 3;
 const NEARBY_PREVIEW = 4;
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
+/** Morning 5 AM-noon, afternoon to 5 PM, evening after that (and through the night). */
+export function greeting(h = new Date().getHours()): string {
+  if (h >= 5 && h < 12) return "Good Morning";
+  if (h >= 12 && h < 17) return "Good Afternoon";
+  return "Good Evening";
 }
 
 /** "2026-09-10" -> "Thu, 10 Sept". */
@@ -66,11 +70,11 @@ export default function Dashboard() {
   const stations = useStationStore((s) => s.stations);
   const stationsLoading = useStationStore((s) => s.loading);
   const loadStations = useStationStore((s) => s.load);
-  const setFilter = useStationStore((s) => s.setFilter);
 
   useEffect(() => {
     void loadBookings();
-    if (stations.length === 0) void loadStations();
+    // Always refetch; what is on screen stays until the fresh list arrives.
+    void loadStations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -97,7 +101,6 @@ export default function Dashboard() {
   );
 
   const displayBookings = showAll ? bookings : activeBookings;
-  const completed = bookings.filter((b) => b.status === "completed").length;
   const next = activeBookings[0] ?? null;
 
   const vehicles = useMemo(
@@ -129,33 +132,131 @@ export default function Dashboard() {
     ),
   );
 
-  const onCancel = async (id: string) => {
-    if (!window.confirm("Are you sure you want to cancel this booking?")) return;
+  // The booking whose cancel sheet is open (null = closed).
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const onCancel = (id: string) => setCancelling(id);
+  const confirmCancel = async (reason?: string) => {
+    if (!cancelling) return;
+    setCancelBusy(true);
     try {
-      await apiCancelBooking(id);
-      pushToast("Booking cancelled successfully", "success");
+      await apiCancelBooking(cancelling, reason);
+      pushToast("Booking cancelled. Nothing was charged.", "success");
+      setCancelling(null);
       // Refetch rather than patching locally: cancelling frees a slot and
       // moves the queue, and the server owns both of those.
       await loadBookings();
     } catch (err) {
       pushToast(toApiError(err).msg, "error");
+    } finally {
+      setCancelBusy(false);
     }
   };
 
-  const findFuel = (filter: "petrol" | "cng") => {
-    setFilter(filter);
-    navigate("/stations");
+  /** Quick action: the full booking list on this page. */
+  const showHistory = () => {
+    setShowAll(true);
+    document.getElementById("my-bookings")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const firstName = user?.name?.split(" ")[0];
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
 
+  // Active / All bookings. On top beside "Best station for you" when nothing
+  // is booked; below, under the upcoming booking card, when something is.
+  const bookingsPanel = (
+    <section className="cx-panel" id="my-bookings" style={{ scrollMarginTop: 90 }}>
+      <div className="cx-panel-head">
+        <h2 className="cx-panel-title">
+          <i className="fas fa-calendar-check" aria-hidden />
+          {showAll ? "Booking History" : "Active Bookings"}
+        </h2>
+        <div className="cx-segment" role="group" aria-label="Filter bookings">
+          <button
+            type="button"
+            className={!showAll ? "is-on" : ""}
+            aria-pressed={!showAll}
+            onClick={() => setShowAll(false)}
+          >
+            Active
+          </button>
+          <button
+            type="button"
+            className={showAll ? "is-on" : ""}
+            aria-pressed={showAll}
+            onClick={() => setShowAll(true)}
+          >
+            All
+          </button>
+        </div>
+      </div>
+
+      <div className={`cx-panel-body ${displayBookings.length > 0 ? "is-flush" : ""}`}>
+        {displayBookings.length === 0 ? (
+          <EmptyState
+            icon="fa-calendar-days"
+            title={showAll ? "No bookings yet" : "No active bookings"}
+            subtitle="Find a nearby station and reserve your fuel slot in under a minute."
+            action={
+              <button className="btn btn-primary btn-sm" onClick={() => navigate("/stations")}>
+                <i className="fas fa-location-dot" aria-hidden /> Find a Station
+              </button>
+            }
+          />
+        ) : (
+          <div className="cx-rows">
+            {displayBookings.map((b) => (
+              <BookingCard key={String(b._id)} booking={b} stations={stations} onCancel={onCancel} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
   return (
     <Layout
-      title={`${greeting()}${firstName ? `, ${firstName}` : ""}`}
+      title={`${greeting()}${firstName ? ` ${firstName}` : ""}`}
       subtitle={`${today} · Your fuel bookings at a glance`}
       onRefresh={refresh}
     >
+      <CancelBookingSheet
+        open={cancelling !== null}
+        waitlisted={bookings.find((x) => String(x._id) === cancelling)?.status === "waitlisted"}
+        busy={cancelBusy}
+        onClose={() => setCancelling(null)}
+        onConfirm={(reason) => void confirmCancel(reason)}
+      />
+
+      {/* Quick actions: in the mobile app only (VITE_APP_MODE=customer), not on the website. */}
+      {import.meta.env.VITE_APP_MODE === "customer" && (
+      <nav className="grid grid-cols-4 gap-2 mb-5" aria-label="Quick actions">
+        {(
+          [
+            ["fa-gas-pump", "Book fuel", () => navigate("/booking")],
+            ["fa-location-arrow", "Nearest", () => navigate("/nearest-pump")],
+            ["fa-car-side", "My vehicles", () => navigate("/my-vehicles")],
+            ["fa-clock-rotate-left", "History", showHistory],
+          ] as const
+        ).map(([icon, label, go]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={go}
+            className="cx-panel flex flex-col items-center justify-center gap-1.5 py-3 min-h-[72px]"
+            style={{ cursor: "pointer" }}
+          >
+            <span className="cx-stat-icon cx-tone-brand" style={{ width: 36, height: 36 }}>
+              <i className={`fas ${icon}`} aria-hidden />
+            </span>
+            <span className="text-[12px] font-semibold" style={{ color: "var(--text)" }}>
+              {label}
+            </span>
+          </button>
+        ))}
+      </nav>
+      )}
+
       <div className="cx-kpis">
         <Kpi
           icon="fa-calendar-check"
@@ -192,28 +293,18 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-5 items-start mb-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        {next ? (
-          <NextBookingPanel
-            booking={next}
-            stations={stations}
-            onOpen={() => navigate(`/confirmation/${next._id}`)}
-          />
-        ) : (
-          <BookPromptPanel onBook={() => navigate("/booking")} onFind={findFuel} />
-        )}
-
-        <SummaryPanel
-          next={next}
-          stations={stations}
-          completed={completed}
-          total={bookings.length}
-          onAction={() => (next ? navigate(`/confirmation/${next._id}`) : navigate("/booking"))}
-        />
-      </div>
-
       <div className="grid gap-5 items-start lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5 min-w-0">
+          {/* Left column: the upcoming booking, or (with none) the bookings list. */}
+          {next ? (
+            <NextBookingPanel
+              booking={next}
+              stations={stations}
+              onOpen={() => navigate(`/confirmation/${next._id}`)}
+            />
+          ) : (
+            bookingsPanel
+          )}
           <section className="cx-panel">
             <div className="cx-panel-head">
               <div className="flex items-center gap-3 min-w-0">
@@ -225,6 +316,10 @@ export default function Dashboard() {
               <button type="button" className="btn btn-outline btn-sm" onClick={() => navigate("/stations")}>
                 View Map <i className="fas fa-arrow-right" aria-hidden />
               </button>
+            </div>
+            {/* Every station with a real location, live (the store is patched by socket events). */}
+            <div className="px-4 pt-4 sm:px-5">
+              <StationsMap stations={stations} userCoords={getLastKnownUserCoords()} className="h-[300px] sm:h-[340px]" />
             </div>
             <div className="cx-panel-body is-flush">
               {nearby.length === 0 ? (
@@ -246,56 +341,28 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="cx-panel">
-            <div className="cx-panel-head">
-              <h2 className="cx-panel-title">
-                <i className="fas fa-calendar-check" aria-hidden />
-                {showAll ? "Booking History" : "Active Bookings"}
-              </h2>
-              <div className="cx-segment" role="group" aria-label="Filter bookings">
-                <button
-                  type="button"
-                  className={!showAll ? "is-on" : ""}
-                  aria-pressed={!showAll}
-                  onClick={() => setShowAll(false)}
-                >
-                  Active
-                </button>
-                <button
-                  type="button"
-                  className={showAll ? "is-on" : ""}
-                  aria-pressed={showAll}
-                  onClick={() => setShowAll(true)}
-                >
-                  All
-                </button>
-              </div>
-            </div>
-
-            <div className={`cx-panel-body ${displayBookings.length > 0 ? "is-flush" : ""}`}>
-              {displayBookings.length === 0 ? (
-                <EmptyState
-                  icon="fa-calendar-days"
-                  title={showAll ? "No bookings yet" : "No active bookings"}
-                  subtitle="Find a nearby station and reserve your fuel slot in under a minute."
-                  action={
-                    <button className="btn btn-primary btn-sm" onClick={() => navigate("/stations")}>
-                      <i className="fas fa-location-dot" aria-hidden /> Find a Station
-                    </button>
-                  }
-                />
-              ) : (
-                <div className="cx-rows">
-                  {displayBookings.map((b) => (
-                    <BookingCard key={String(b._id)} booking={b} stations={stations} onCancel={onCancel} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+          {next && bookingsPanel}
         </div>
 
         <div className="space-y-5 min-w-0">
+          {/* Right column: "Best station for you" first. */}
+          <section className="cx-panel">
+            <div className="cx-panel-head">
+              <h2 className="cx-panel-title">
+                <i className="fas fa-crosshairs" aria-hidden /> Best station for you
+              </h2>
+            </div>
+            <div className="cx-panel-body cx-unwrap">
+              <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
+                Set your location and choose a fuel. We rank stations by distance, live queue and price.
+              </p>
+              {/* FuelSelection renders inside the picker's card, where the
+                  Vanilla #dashboard-geo-display block lived -- not below it. */}
+              <LocationPicker>
+                <FuelSelection />
+              </LocationPicker>
+            </div>
+          </section>
           <section className="cx-panel">
             <div className="cx-panel-head">
               <h2 className="cx-panel-title">
@@ -353,23 +420,6 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="cx-panel">
-            <div className="cx-panel-head">
-              <h2 className="cx-panel-title">
-                <i className="fas fa-crosshairs" aria-hidden /> Best station for you
-              </h2>
-            </div>
-            <div className="cx-panel-body cx-unwrap">
-              <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
-                Set your location and choose a fuel. We rank stations by distance, live queue and price.
-              </p>
-              {/* FuelSelection renders inside the picker's card, where the
-                  Vanilla #dashboard-geo-display block lived -- not below it. */}
-              <LocationPicker>
-                <FuelSelection />
-              </LocationPicker>
-            </div>
-          </section>
         </div>
       </div>
     </Layout>
@@ -429,9 +479,7 @@ function NextBookingPanel({
 }) {
   const st = resolveBookingStation(b, stations);
   const vehicle = [b.vehicleName, b.vehiclePlate].filter(Boolean).join(" · ");
-  const directions = st.hasValidCoords
-    ? `https://www.google.com/maps/dir/?api=1&destination=${st.lat},${st.lng}&travelmode=driving`
-    : null;
+  const directions = st.hasValidCoords ? directionsUrl(st.lat, st.lng) : null;
   const heading =
     b.status === "serving"
       ? "Fuelling now"
@@ -505,135 +553,6 @@ function NextBookingPanel({
             </a>
           )}
         </div>
-      </div>
-    </section>
-  );
-}
-
-function BookPromptPanel({
-  onBook,
-  onFind,
-}: {
-  onBook: () => void;
-  onFind: (filter: "petrol" | "cng") => void;
-}) {
-  const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-
-  const tile = (icon: string, tone: string, label: string, sub: string, onClick: () => void) => (
-    <button type="button" className="cx-option flex items-center gap-3 text-left" onClick={onClick}>
-      <span className={`cx-stat-icon ${tone}`}>
-        <i className={`fas ${icon}`} aria-hidden />
-      </span>
-      <span className="min-w-0">
-        <span className="cx-option-name block">{label}</span>
-        <span className="cx-option-sub block">{sub}</span>
-      </span>
-    </button>
-  );
-
-  return (
-    <section className="cx-panel">
-      <div className="cx-panel-head">
-        <div className="flex items-center gap-3 min-w-0">
-          <h2 className="cx-panel-title">Book your next fill</h2>
-          <span className="cx-pill hidden sm:inline-flex">Skip the queue</span>
-        </div>
-        <button type="button" className="btn btn-outline btn-sm" onClick={() => navigate("/stations")}>
-          All Stations <i className="fas fa-arrow-right" aria-hidden />
-        </button>
-      </div>
-      <div className="cx-panel-body">
-        <p className="text-sm" style={{ color: "var(--text2)" }}>
-          Compare live queues and prices nearby, then reserve a slot in under a minute.
-        </p>
-
-        <form
-          className="cx-search mt-4"
-          style={{ maxWidth: "none" }}
-          role="search"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const q = query.trim();
-            navigate(q ? `/stations?q=${encodeURIComponent(q)}` : "/stations");
-          }}
-        >
-          <i className="fas fa-magnifying-glass" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search a station or area, e.g. Koregaon Park"
-            aria-label="Search stations"
-          />
-        </form>
-
-        <div className="grid gap-3 mt-4 sm:grid-cols-3">
-          {tile("fa-calendar-plus", "cx-tone-red", "Book a slot", "Pick station, time & vehicle", onBook)}
-          {tile("fa-droplet", "cx-tone-amber", "Petrol stations", "Nearest with live queues", () => onFind("petrol"))}
-          {tile("fa-fire", "cx-tone-green", "CNG stations", "Nearest with live queues", () => onFind("cng"))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/** Modelled on the admin "Order Summary" panel. */
-function SummaryPanel({
-  next,
-  stations,
-  completed,
-  total,
-  onAction,
-}: {
-  next: Booking | null;
-  stations: UiStation[];
-  completed: number;
-  total: number;
-  onAction: () => void;
-}) {
-  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const station = next ? resolveBookingStation(next, stations) : null;
-
-  return (
-    <section className="cx-panel">
-      <div className="cx-panel-head">
-        <h2 className="cx-panel-title">
-          <i className="fas fa-receipt" aria-hidden /> Booking Summary
-        </h2>
-      </div>
-      <div className="cx-panel-body">
-        <div className="cx-snapshot">
-          <p className="cx-snapshot-eyebrow">Today&apos;s snapshot</p>
-          <p className="cx-snapshot-text">
-            {next && station ? (
-              <>
-                Your <b>{next.fuelType}</b> slot at <b>{station.name}</b> is on <b>{formatDay(next.bookingDate)}</b> at{" "}
-                <b>{next.timeSlot}</b>. Show your PIN at the pump.
-              </>
-            ) : (
-              <>
-                No fuel slot booked. Open <b>Find Stations</b> to compare live queues, or book straight away.
-              </>
-            )}
-          </p>
-        </div>
-
-        <div className="flex items-end justify-between mt-6">
-          <span className="cx-eyebrow">Completed bookings</span>
-          <span className="cx-snapshot-count">{completed}</span>
-        </div>
-        <div className="cx-progress mt-3" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-          <span style={{ width: `${pct}%` }} />
-        </div>
-        <p className="text-[11.5px] mt-2" style={{ color: "var(--muted)" }}>
-          {total > 0 ? `${completed} of ${total} bookings completed` : "Your first booking will show up here"}
-        </p>
-
-        <button type="button" className="btn btn-primary btn-block btn-lg mt-5" onClick={onAction}>
-          <i className={`fas ${next ? "fa-qrcode" : "fa-calendar-plus"}`} aria-hidden />
-          {next ? "View QR Pass" : "Book Fuel"}
-        </button>
       </div>
     </section>
   );

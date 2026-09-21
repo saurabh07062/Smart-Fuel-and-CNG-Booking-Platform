@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- FuelMart brand red, the same accent the app uses. -->
+    <color name="fuelmart_red">#E23744</color>
+    <color name="fuelmart_red_dark">#B5202E</color>
+</resources>

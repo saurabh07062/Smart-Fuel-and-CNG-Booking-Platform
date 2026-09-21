@@ -65,10 +65,12 @@ export default function Login() {
     const { user } = res.data;
     setSession(user);
 
-    // Same messages the Vanilla app showed, so nothing feels different.
-    if (user.role === "vendor" && user.vendorStatus !== "active") {
+    // Same messages the Vanilla app showed, so nothing feels different. The
+    // vendor ones are left out of the customer app build.
+    const website = import.meta.env.VITE_APP_MODE !== "customer";
+    if (website && user.role === "vendor" && user.vendorStatus !== "active") {
       pushToast(`Your vendor application is ${user.vendorStatus}.`, "warning");
-    } else if (user.role === "vendor" && user.activated === false) {
+    } else if (website && user.role === "vendor" && user.activated === false) {
       pushToast("Enter your secret code to open your dashboard", "info");
     } else {
       pushToast(`Welcome back, ${user.name.split(" ")[0]}!`, "success");
@@ -89,7 +91,7 @@ export default function Login() {
   return (
     <div
       className="min-h-screen flex flex-col justify-between"
-      style={{ background: "url('/bg-image.png') center/cover", position: "relative" }}
+      style={{ background: `url('${import.meta.env.BASE_URL}bg-image.png') center/cover`, position: "relative" }}
     >
       <div className="absolute inset-0" style={{ background: "rgba(11,17,32,0.7)" }} />
 
@@ -197,12 +199,14 @@ export default function Login() {
               Create an account
             </Link>
           </p>
+          {import.meta.env.VITE_APP_MODE !== "customer" && (
           <p className="text-center text-[13px] mt-2" style={{ color: "var(--muted)" }}>
             Approved vendor?{" "}
             <Link to="/vendor/secret-code" className="font-bold" style={{ color: "var(--primary)" }}>
               Vendor Secret Code
             </Link>
           </p>
+          )}
         </form>
       </div>
     </div>

@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import type { NearbyStation } from "@/types";
+import { directionsUrl } from "@/utils/navigation";
+import { distanceNote } from "@/utils/distanceNote";
 
 interface Props {
   station: NearbyStation;
@@ -33,6 +35,9 @@ function waitBucket(mins: number) {
  */
 export default function PumpCard({ station: st, fuelType, isPrimary = false }: Props) {
   const navigate = useNavigate();
+  // Same navigation link as every other Directions button (utils/navigation.ts);
+  // it used to open a map search here, and "null,null" for a station with no position.
+  const directions = directionsUrl(st.latitude, st.longitude);
 
   const searchedUnit = fuelType.toUpperCase() === "CNG" ? "/kg" : "/L";
   const searchedPrice =
@@ -102,6 +107,7 @@ export default function PumpCard({ station: st, fuelType, isPrimary = false }: P
               {st.distance}
               <small>km</small>
             </p>
+            {distanceNote(st) && <p className="text-[11px] text-[var(--muted)] mt-0.5">{distanceNote(st)}</p>}
           </div>
           <div className="cx-metric is-soft">
             <p className="cx-metric-label">{fuelType} price</p>
@@ -185,14 +191,9 @@ export default function PumpCard({ station: st, fuelType, isPrimary = false }: P
         <button
           type="button"
           className="cx-icon-btn"
-          onClick={() =>
-            window.open(
-              `https://maps.google.com/?q=${st.latitude},${st.longitude}`,
-              "_blank",
-              "noopener,noreferrer",
-            )
-          }
-          title="Directions"
+          disabled={!directions}
+          onClick={() => directions && window.open(directions, "_blank", "noopener,noreferrer")}
+          title={directions ? "Directions" : "Location not set for this station"}
           aria-label="Directions"
         >
           <i className="fas fa-diamond-turn-right" aria-hidden />

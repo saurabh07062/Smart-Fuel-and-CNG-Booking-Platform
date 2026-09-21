@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { getMe } from "@/services/api/authApi";
+import { adoptBrowserSession } from "@/services/api/apiClient";
+import type { User } from "@/types";
 
 /**
  * Runs once at app start.
@@ -26,12 +28,18 @@ export function useAuthBoot(): { ready: boolean } {
   const patchUser = useAuthStore((s) => s.patchUser);
   const endSession = useAuthStore((s) => s.endSession);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const login = useAuthStore((s) => s.login);
 
   useEffect(() => {
     let cancelled = false;
 
     async function verify() {
       if (!isAuthenticated) {
+        // A new tab: signed in already if this browser is (another tab's
+        // latest sign-in), as its own copy from now on.
+        const user = await adoptBrowserSession<User>();
+        if (cancelled) return;
+        if (user) login(user);
         setReady(true);
         return;
       }

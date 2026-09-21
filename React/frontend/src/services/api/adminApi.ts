@@ -81,6 +81,15 @@ export async function updateAdminOrderStatus(bookingId: string, status: string) 
   return data;
 }
 
+/** Orders the server lets an admin delete: finished ones only. */
+export const DELETABLE_ORDER_STATUSES = ["completed", "cancelled", "expired", "no_show"];
+
+/** DELETE /v1/admin/orders/:bookingId -- a finished order and its notifications. */
+export async function deleteAdminOrder(bookingId: string) {
+  const { data } = await apiClient.delete<{ ok: boolean; msg?: string }>(`/v1/admin/orders/${bookingId}`);
+  return data;
+}
+
 export interface SecurityEventRow {
   id: string;
   rule: string;

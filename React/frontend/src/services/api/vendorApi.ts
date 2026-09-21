@@ -74,7 +74,26 @@ export interface FuelInventoryStatus {
   percent: number | null;
 }
 
+/** A fuel's nozzles: how many, and how many take app bookings (online); the rest serve walk-ins. */
+export interface NozzleSetup {
+  total: number;
+  online: number;
+}
+
+/** One day's hours: open all day, closed, or open..close (HH:MM, India time). */
+export interface DayHours {
+  open: string;
+  close: string;
+  is24h: boolean;
+  isClosed: boolean;
+}
+
+export type ScheduleDay = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+export type OperatingSchedule = Record<ScheduleDay, DayHours>;
+
 export interface VendorStation extends Station {
+  operatingSchedule?: Partial<OperatingSchedule>;
+  nozzleConfig?: { petrol?: NozzleSetup; diesel?: NozzleSetup; cng?: NozzleSetup };
   inventory?: { petrol: number; diesel: number; cng: number };
   tankCapacity?: { petrol: number | null; diesel: number | null; cng: number | null };
   /** Only fuels the station sells appear here. */
@@ -249,6 +268,12 @@ export interface VendorProfile {
   vendorAddress?: string;
   vendorDescription?: string;
   vendorStatus?: string;
+  /** Public /uploads/vendors path, or null when no photo has been uploaded. */
+  profileImage?: string | null;
+  /** Signature printed on invoices, or null. */
+  signatureImage?: string | null;
+  /** Fuel keys chosen at registration; absent for older vendors. */
+  vendorFuelTypes?: Array<"petrol" | "diesel" | "cng">;
 }
 
 export interface PriceHistoryEntry {
@@ -319,7 +344,10 @@ export async function fetchVendorStations(): Promise<VendorStation[]> {
 export interface CreateStationInput {
   name: string;
   address: string;
-  prices: { petrol: number; diesel: number; cng: number };
+  /** Prices for the fuels this station sells only. */
+  prices: Partial<Record<"petrol" | "diesel" | "cng", number>>;
+  /** Labels ("Petrol", "CNG"); must be fuels the vendor registered for. */
+  fuelTypes?: string[];
   openingHours: string;
   /** The pump's exact position, pinned on the map. Saved as GeoJSON `location` by the server. */
   coordinates?: { lat: number; lng: number };
@@ -327,6 +355,77 @@ export interface CreateStationInput {
 
 export async function createVendorStation(input: CreateStationInput) {
   const { data } = await apiClient.post(`${BASE}/stations`, input);
+  return data;
+}
+
+/**
+ * PUT /vendor-panel/stations/:id/pump-images -- add or replace the petrol
+ * and/or CNG pump photo. A photo not given is left unchanged on the server.
+ */
+export async function updateVendorPumpImages(id: string, files: { petrol?: File | null; cng?: File | null }) {
+  const body = new FormData();
+  if (files.petrol) body.append("petrolImage", files.petrol);
+  if (files.cng) body.append("cngImage", files.cng);
+  const { data } = await apiClient.put<{ msg?: string; pumpImages?: { petrol?: string | null; cng?: string | null } }>(
+    `${BASE}/stations/${id}/pump-images`,
+    body,
+  );
+  return data;
+}
+
+export interface UpdateStationInput {
+  name?: string;
+  address?: string;
+  openingHours?: string;
+  /** Labels ("Petrol", "CNG"); must be fuels the vendor registered for. */
+  fuelTypes?: string[];
+  coordinates?: { lat: number; lng: number };
+  /** The station's updatedAt when the form opened; the server refuses (409) if it changed since. */
+  expectedUpdatedAt?: string;
+}
+
+/** PUT /vendor-panel/stations/:id -- edit a station's details and location. */
+export async function updateVendorStation(id: string, input: UpdateStationInput) {
+  const { data } = await apiClient.put<VendorStation>(`${BASE}/stations/${id}`, input);
+  return data;
+}
+
+/**
+ * POST /bookings/verify -- check a customer in at the pump with their 4-digit
+ * code. The server starts fueling (or queues the car if the nozzle is busy)
+ * and completes the booking by itself when the fuel's time is up.
+ */
+export async function checkInWithCode(verificationCode: string) {
+  const { data } = await apiClient.post<{
+    msg?: string;
+    started?: boolean;
+    queued?: boolean;
+    completesAt?: string | null;
+    booking?: {
+      _id?: string;
+      station?: string | { _id?: string };
+      orderId?: string;
+      status?: string;
+      amount?: number;
+      payMethod?: string;
+      paymentStatus?: string;
+    };
+  }>("/bookings/verify", { verificationCode });
+  return data;
+}
+
+/** PATCH /vendor-panel/stations/:id/nozzles -- e.g. { petrol: { total: 4, online: 1 } }. */
+export async function updateNozzleConfig(id: string, setup: Partial<Record<"petrol" | "diesel" | "cng", NozzleSetup>>) {
+  const { data } = await apiClient.patch<{ msg?: string; nozzleConfig?: Record<string, NozzleSetup> }>(`${BASE}/stations/${id}/nozzles`, setup);
+  return data;
+}
+
+/** PATCH /vendor-panel/stations/:id/schedule -- all seven days; the booking slots follow them. */
+export async function updateStationSchedule(id: string, schedule: OperatingSchedule) {
+  const { data } = await apiClient.patch<{ msg?: string; openingHours?: string; outsideHours?: number }>(
+    `${BASE}/stations/${id}/schedule`,
+    schedule,
+  );
   return data;
 }
 
@@ -381,9 +480,10 @@ export async function updateVendorBookingStatus(
  * attendant received a pay-at-the-pump payment. Recorded once on the server;
  * a repeat answers alreadyPaid.
  */
-export async function collectVendorBookingPayment(stationId: string, bookingId: string) {
+export async function collectVendorBookingPayment(stationId: string, bookingId: string, method: "cash" | "upi") {
   const { data } = await apiClient.patch<{ msg?: string; alreadyPaid?: boolean; booking?: VendorBooking }>(
     `${BASE}/stations/${stationId}/bookings/${bookingId}/collect`,
+    { method },
   );
   return data;
 }
@@ -467,6 +567,26 @@ export async function fetchVendorProfile(): Promise<VendorProfile> {
 
 export async function updateVendorProfile(input: Partial<VendorProfile>) {
   const { data } = await apiClient.put<{ msg?: string }>(`${BASE}/profile`, input);
+  return data;
+}
+
+/**
+ * PUT /vendor-panel/profile with only a photo (multer field "vendorImage").
+ * The server stores it through middleware/upload.js and deletes the old one;
+ * the other profile fields are left as they are.
+ */
+export async function uploadVendorProfilePhoto(file: File) {
+  const body = new FormData();
+  body.append("vendorImage", file);
+  const { data } = await apiClient.put<{ msg?: string; user?: VendorProfile }>(`${BASE}/profile`, body);
+  return data;
+}
+
+/** PUT /vendor-panel/profile/signature (multer field "signatureImage"). */
+export async function uploadVendorSignature(file: File) {
+  const body = new FormData();
+  body.append("signatureImage", file);
+  const { data } = await apiClient.put<{ msg?: string; signatureImage?: string | null }>(`${BASE}/profile/signature`, body);
   return data;
 }
 

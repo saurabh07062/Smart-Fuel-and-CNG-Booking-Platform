@@ -33,10 +33,21 @@ test("windowsOverlap: touching windows do not overlap, one millisecond does", ()
   assert.equal(nozzleScheduler.windowsOverlap(a, new Date(2001), b, new Date(3000)), true);
 });
 
-test("labelAvailability: matches the booking rule, one query's worth of windows", () => {
-  const cng1000 = { start: at(10), end: new Date(at(10).getTime() + 300_000), status: "upcoming" };
-  const slots = nozzleScheduler.labelAvailability([cng1000], "petrol", DATE, ["9:30 AM", "10:00 AM", "10:30 AM"]);
-  assert.deepEqual(slots.map((s) => [s.label, s.available]), [["9:30 AM", true], ["10:00 AM", false], ["10:30 AM", true]]);
+test("labelAvailability: a window keeps its remaining capacity around what is booked", () => {
+  // The nozzle is busy 10:00-10:05; each Petrol fill takes 40 s.
+  const busy = { start: at(10), end: new Date(at(10).getTime() + 300_000), status: "upcoming" };
+  const slots = nozzleScheduler.labelAvailability([busy], "petrol", DATE, ["9:30 AM", "10:00 AM", "10:30 AM"], undefined, {
+    now: new Date(at(9).getTime()),
+  });
+  assert.deepEqual(
+    slots.map((s) => [s.label, s.available, s.capacity.total, s.capacity.available]),
+    [
+      ["9:30 AM", true, 45, 45],
+      ["10:00 AM", true, 45, 37], // 25 minutes left: floor(1500 / 40)
+      ["10:30 AM", true, 45, 45],
+    ],
+  );
+  assert.equal(slots[1].start.getTime(), at(10).getTime() + 300_000, "the first position is when the nozzle frees, 10:05");
 });
 
 test("pickAlternative: a bookable but slow station only gets a genuinely faster one", () => {
@@ -129,13 +140,20 @@ test("station finder against MongoDB", async (t) => {
     await t.test("slots come from the nozzle scheduler and use bookable labels", async () => {
       const { byName } = await run();
       const busy = byName["busy-1km"];
+      // One 40 s Petrol booking at 10:00 leaves the rest of the window: at 10:05
+      // the next position starts at once; 25 minutes of 40 s fills remain.
       assert.equal(busy.currentSlot.slot, "10:00 AM");
-      assert.equal(busy.currentSlot.status, "FULL");
-      // 10:00 petrol holds the Petrol nozzle; the 10:30 CNG booking is on the CNG nozzle.
-      assert.equal(busy.preferredSlot.slot, "10:30 AM", "a CNG booking never takes a Petrol slot");
-      assert.equal(busy.preferredSlot.start, "10:30");
-      assert.equal(busy.preferredSlot.end, "11:00");
-      assert.deepEqual(busy.recommendedSlots.map((s) => s.slot), ["10:30 AM", "11:00 AM", "11:30 AM"]);
+      assert.equal(busy.currentSlot.status, "AVAILABLE");
+      assert.equal(busy.currentSlot.start, "10:00");
+      assert.equal(busy.currentSlot.end, "10:30");
+      assert.equal(busy.currentSlot.estimatedStart, "10:05");
+      assert.equal(busy.currentSlot.capacity, 45);
+      assert.equal(busy.currentSlot.booked, 1);
+      assert.equal(busy.currentSlot.available, 37);
+      // The 10:30 CNG booking is on the CNG nozzle: the Petrol window keeps all 45.
+      const petrol1030 = busy.recommendedSlots.find((s) => s.slot === "10:30 AM");
+      assert.equal(petrol1030.available, 45, "a CNG booking never takes Petrol capacity");
+      assert.deepEqual(busy.recommendedSlots.map((s) => s.slot), ["10:00 AM", "10:30 AM", "11:00 AM"]);
       assert.equal(byName["free-4km"].preferredSlot.slot, "10:00 AM", "the current label is still bookable at 10:05");
     });
 
@@ -162,6 +180,11 @@ test("station finder against MongoDB", async (t) => {
       assert.equal(big.byName["free-4km"].unavailableCode, "INSUFFICIENT_STOCK");
 
       const { stations } = await discovery.findStationsForFuel(origin, { fuelType: "petrol", radiusKm: 10 });
+      // A station that closes at 22:00 has nothing left at 23:00 (a 24-hour one would).
+      const closesAt22 = Object.fromEntries(
+        ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((d) => [d, { open: "06:00", close: "22:00", is24h: false, isClosed: false }]),
+      );
+      for (const st of stations) st.operatingSchedule = closesAt22;
       const late = await buildFinderResults({ stations, fuel: "petrol", now: at(23, 0) });
       const lateFree = late.stations.find((s) => short(s.stationName) === "free-4km");
       assert.equal(lateFree.unavailableCode, "NO_SLOT_TODAY");

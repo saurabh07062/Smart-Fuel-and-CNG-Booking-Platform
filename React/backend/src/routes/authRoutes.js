@@ -21,7 +21,9 @@ router.post("/register", registerLimiter, authController.register);
 router.post("/login", loginLimiter, authController.login);
 router.get("/me", auth, authController.getMe);
 router.get("/verify-email/:token", authController.verifyEmail);
-router.post("/resend-verification", authController.resendVerification);
+// Sends email: limited like forgot-password.
+const resendVerificationLimiter = rateLimit({ limit: 5, windowMs: 15 * 60_000, keyPrefix: "resend-verification", keyFn: (req) => req.ip });
+router.post("/resend-verification", resendVerificationLimiter, authController.resendVerification);
 
 // Forgot password (services/security/passwordReset.js).
 router.post("/forgot-password", forgotPasswordLimiter, authController.forgotPassword);

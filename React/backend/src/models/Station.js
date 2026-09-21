@@ -33,6 +33,14 @@ const StationSchema = new mongoose.Schema(
       sunday:    { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } }
     },
     images: [{ type: String }],
+    // One photo each of the station's petrol and CNG dispensers, uploaded by
+    // its owner (PUT /api/vendor-panel/stations/:id/pump-images). Public
+    // /uploads/stations paths from middleware/upload.js; null until uploaded,
+    // never a placeholder.
+    pumpImages: {
+      petrol: { type: String, default: null },
+      cng: { type: String, default: null },
+    },
     rating: { type: Number, default: 4.5 },
     reviews: [ReviewSchema],
 
@@ -77,6 +85,14 @@ const StationSchema = new mongoose.Schema(
       cng: { type: Number, default: 1, min: 0 },
       petrol: { type: Number, default: 2, min: 0 },
       diesel: { type: Number, default: 2, min: 0 }
+    },
+    // Each fuel's nozzles split between app bookings and walk-ins, set by the
+    // vendor (config/nozzleModes.js): { total, online }, online 0..total.
+    // Unset = one nozzle shared by bookings and walk-ins.
+    nozzleConfig: {
+      petrol: { total: { type: Number, min: 1, max: 20 }, online: { type: Number, min: 0, max: 20 } },
+      diesel: { total: { type: Number, min: 1, max: 20 }, online: { type: Number, min: 0, max: 20 } },
+      cng: { total: { type: Number, min: 1, max: 20 }, online: { type: Number, min: 0, max: 20 } },
     },
     // The legacy nozzles field (kept for backward compatibility, mapped to total)
     nozzles: { type: Number, default: 4, min: 1 },

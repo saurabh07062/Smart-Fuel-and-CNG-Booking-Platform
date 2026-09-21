@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { Booking, Station } from "@/types";
 import { onResync, onSocket } from "@/services/socket/socket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
@@ -66,6 +67,17 @@ export function useRealtimeSync() {
   const userRef = useRef(user);
   userRef.current = user;
 
+  // Fueling started for this customer (the attendant entered their code):
+  // open that booking's live countdown page from wherever they are. Once per
+  // booking, customers only -- vendors and admins receive the same event.
+  const navigate = useNavigate();
+  const location = useLocation();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
+  const openedCountdown = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     /** Fired for every booking event. The list is refetched, not guessed. */
     const onBooking = (booking: Booking) => {
@@ -74,7 +86,23 @@ export function useRealtimeSync() {
       // slower refetch cannot be overwritten by this older event.
       upsertBooking(booking);
       void loadBookings();
+      openCountdown(booking);
       announceCompletion(booking);
+    };
+
+    const openCountdown = (booking: Booking) => {
+      if (!booking || booking.status !== "serving") return;
+      const me = userRef.current;
+      if (!me || me.role !== "customer") return;
+      const bookingUserId =
+        typeof booking.user === "object" && booking.user ? booking.user._id : booking.user;
+      if (String(bookingUserId) !== String(me.id ?? me._id)) return;
+
+      const id = String(booking._id);
+      if (!id || openedCountdown.current.has(id)) return;
+      openedCountdown.current.add(id);
+      const target = `/confirmation/${id}`;
+      if (pathRef.current !== target) navigateRef.current(target);
     };
 
     const announceCompletion = (booking: Booking) => {
@@ -181,6 +209,10 @@ export function useRealtimeSync() {
       onSocket<Station>(SOCKET_EVENTS.STATION_STATUS_UPDATED, patchStation),
 
       // ---- vendor ------------------------------------------------------
+      // Website only: compiled out of the customer app build (VITE_APP_MODE=customer).
+      ...(import.meta.env.VITE_APP_MODE === "customer"
+        ? []
+        : [
       // The vendor's tracking page flips from "waiting" to "check your email"
       // with no refresh, because the store it reads is updated here.
       onSocket<{ vendorStatus?: string; vendorCode?: string; secretCodeEmailed?: boolean }>(
@@ -198,6 +230,26 @@ export function useRealtimeSync() {
           );
         },
       ),
+
+      // A signed-in vendor whose account was suspended, reactivated or had its
+      // code reissued: the route guard reads these fields, so the panel closes
+      // (or reopens) at once. Admins receive the same event about OTHER
+      // vendors -- only a payload about this user is applied.
+      onSocket<{ vendorId?: string; vendorStatus?: string; activated?: boolean }>(
+        SOCKET_EVENTS.VENDOR_STATUS_CHANGED,
+        (payload) => {
+          const me = userRef.current;
+          if (!me || me.role !== "vendor" || String(payload?.vendorId) !== String(me.id ?? me._id)) return;
+          if (!payload.vendorStatus || payload.vendorStatus === "deleted") return;
+          patchUser({
+            vendorStatus: payload.vendorStatus as never,
+            ...(typeof payload.activated === "boolean" ? { activated: payload.activated } : {}),
+          });
+          if (payload.vendorStatus === "suspended") pushToast("Your vendor account has been suspended.", "warning");
+        },
+      ),
+
+          ]),
 
       // ---- notifications -----------------------------------------------
       onSocket<{ _id?: string; type?: string; title?: string; body?: string; message?: string }>(

@@ -168,6 +168,7 @@ router.post("/verify", perIp, perEmail, async (req, res) => {
         vendorStatus: vendor.vendorStatus,
         vendorCode: vendor.vendorCode || null,
         businessName: vendor.businessName || null,
+        vendorFuelTypes: vendor.vendorFuelTypes,
         activated: true,
       },
     });

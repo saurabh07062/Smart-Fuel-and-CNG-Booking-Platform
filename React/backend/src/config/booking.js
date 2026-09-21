@@ -45,19 +45,26 @@ const CONVENIENCE_FEE = envNumber("BOOKING_CONVENIENCE_FEE", 5);
  */
 const BOOKING_REQUESTS_PER_MINUTE = Math.max(1, envNumber("BOOKING_REQUESTS_PER_MINUTE", 20));
 
-/** The only start times a customer can book, India time, 30 minutes apart. */
+/**
+ * Every start time a customer can book, India time, 30 minutes apart, across
+ * the whole day. Each station's opening hours (Station.scheduleAllowsSlot)
+ * decide which of them are open: a 24-hour station offers all of them, a
+ * 06:00-22:00 one the 6:00 AM-9:30 PM ones.
+ */
 const BOOKABLE_SLOT_LABELS = Object.freeze([
+  "12:00 AM", "12:30 AM", "1:00 AM", "1:30 AM", "2:00 AM", "2:30 AM",
+  "3:00 AM", "3:30 AM", "4:00 AM", "4:30 AM", "5:00 AM", "5:30 AM",
   "6:00 AM", "6:30 AM", "7:00 AM", "7:30 AM", "8:00 AM", "8:30 AM",
   "9:00 AM", "9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM",
   "12:00 PM", "12:30 PM", "1:00 PM", "1:30 PM", "2:00 PM", "2:30 PM",
   "3:00 PM", "3:30 PM", "4:00 PM", "4:30 PM", "5:00 PM", "5:30 PM",
   "6:00 PM", "6:30 PM", "7:00 PM", "7:30 PM", "8:00 PM", "8:30 PM",
-  "9:00 PM", "9:30 PM",
+  "9:00 PM", "9:30 PM", "10:00 PM", "10:30 PM", "11:00 PM", "11:30 PM",
 ]);
 const SLOT_SPACING_SECONDS = 30 * 60;
 
 // The labels really are SLOT_SPACING_SECONDS apart: slotEndInstant and the
-// database guard below both depend on it.
+// booking windows depend on it.
 BOOKABLE_SLOT_LABELS.forEach((label, i) => {
   const c = parseClock(label);
   if (!c) throw new Error(`Unparseable slot label "${label}"`);
@@ -70,22 +77,32 @@ BOOKABLE_SLOT_LABELS.forEach((label, i) => {
 });
 
 /**
- * Invariant the database guard relies on (models/Booking.js,
- * uniq_active_nozzle_start_per_fuel): if every booking starts on a slot label
- * and no fill -- even the largest quantity allowed -- outlasts the gap between
- * labels, two bookings on one fuel's nozzle can only overlap by starting at
- * the same moment, which a unique index on (station, fuelType,
- * bookingStartTime) rejects outright. Fail at boot rather than let a longer
- * duration silently weaken that guarantee.
+ * A slot label is a booking WINDOW ("10:00 AM" = 10:00-10:30). Inside it the
+ * scheduler (services/queue/slotAllocator.js) gives each booking its own
+ * start on one of the fuel's app nozzles, so a window holds as many
+ * bookings as fit: nozzles x floor(window / service duration).
+ *
+ * SLOT_GRID_SECONDS is the resolution of those starts (default 30 s): the
+ * first start in a free stretch sits on the grid, later ones follow
+ * back-to-back. It is not a unit of capacity.
  */
+const SLOT_GRID_SECONDS = (() => {
+  const v = envNumber("SLOT_GRID_SECONDS", 30);
+  if (!Number.isInteger(v) || v < 1 || v > SLOT_SPACING_SECONDS || SLOT_SPACING_SECONDS % v !== 0) {
+    throw new Error(`SLOT_GRID_SECONDS must be a whole number of seconds that divides ${SLOT_SPACING_SECONDS}, got ${v}`);
+  }
+  return v;
+})();
+
+/** A fill must fit inside one window, or no booking of it could ever be placed. */
 const longestService = Math.max(
   ...Object.values(FUEL_SERVICE_DURATIONS_SECONDS),
   ...FUEL_KEYS.map((fuel) => getServiceDurationSeconds(fuel, QUANTITY_MAX)),
 );
-if (longestService >= SLOT_SPACING_SECONDS) {
+if (longestService > SLOT_SPACING_SECONDS) {
   throw new Error(
-    `A fuel service duration (${longestService}s) must be shorter than the slot spacing ` +
-      `(${SLOT_SPACING_SECONDS}s), or the unique-start booking guard no longer prevents overlaps.`,
+    `A fuel service duration (${longestService}s) must fit inside one booking window ` +
+      `(${SLOT_SPACING_SECONDS}s).`,
   );
 }
 
@@ -121,13 +138,38 @@ function isSlotElapsed(bookingDate, timeSlot, now = new Date()) {
   return end ? now > end : false;
 }
 
+/**
+ * How far ahead a customer may book, in days after today (India date):
+ * 2 = today, tomorrow and the day after. ADVANCE_BOOKING_DAYS overrides it;
+ * read on each call so it can be changed per environment.
+ */
+function advanceBookingDays() {
+  const v = envNumber("ADVANCE_BOOKING_DAYS", 2);
+  if (!Number.isInteger(v)) throw new Error(`ADVANCE_BOOKING_DAYS must be a whole number of days, got "${process.env.ADVANCE_BOOKING_DAYS}"`);
+  return v;
+}
+
+/** The last India date that can be booked now ("YYYY-MM-DD"). */
+function lastBookableDate(now = new Date()) {
+  return dateKey(new Date(now.getTime() + advanceBookingDays() * 24 * 60 * 60 * 1000));
+}
+
+/** Is this "YYYY-MM-DD" further ahead than bookings are accepted? */
+function isBeyondAdvanceWindow(bookingDate, now = new Date()) {
+  return String(bookingDate) > lastBookableDate(now);
+}
+
 module.exports = {
+  advanceBookingDays,
+  lastBookableDate,
+  isBeyondAdvanceWindow,
   QUANTITY_MIN,
   QUANTITY_MAX,
   CONVENIENCE_FEE,
   BOOKING_REQUESTS_PER_MINUTE,
   BOOKABLE_SLOT_LABELS,
   SLOT_SPACING_SECONDS,
+  SLOT_GRID_SECONDS,
   slotEndInstant,
   isSlotElapsed,
 };

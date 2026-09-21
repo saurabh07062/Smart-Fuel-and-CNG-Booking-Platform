@@ -49,7 +49,7 @@ export default function RoleRoute({ allow, children, requireActivatedVendor }: P
    * the API. Sending them to their tracking page tells them what to do next;
    * the dashboard would just 403 on every request.
    */
-  if (requireActivatedVendor && user.role === "vendor") {
+  if (import.meta.env.VITE_APP_MODE !== "customer" && requireActivatedVendor && user.role === "vendor") {
     if (user.vendorStatus !== "active") return <Navigate to="/vendor/track" replace />;
     if (user.activated === false) return <Navigate to="/vendor/secret-code" replace />;
   }

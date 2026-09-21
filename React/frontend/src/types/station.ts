@@ -23,6 +23,8 @@ export interface Station {
   inventory?: Record<FuelKey, number>;
   /** Per-fuel availability, separate from stock. */
   fuelAvailability?: Record<FuelKey, boolean>;
+  /** Nozzles per fuel, and how many of them take app bookings; the rest serve walk-ins. */
+  nozzleConfig?: Partial<Record<FuelKey, { total: number; online: number }>>;
   isBusy?: boolean;
   unavailableReason?: string | null;
   coordinates?: Coordinates | null;
@@ -31,6 +33,8 @@ export interface Station {
   waitMinutes?: number | null;
   queueStatus?: "Low" | "Moderate" | "High" | "Very High" | "Unknown";
   images?: string[];
+  /** Owner-uploaded dispenser photos (public /uploads paths), null until added. */
+  pumpImages?: { petrol?: string | null; cng?: string | null };
   rating?: number;
   amenities?: string[];
   openingHours?: string;
@@ -62,6 +66,10 @@ export interface UiStation extends Station {
   queue: number;
   waitTime: number;
   distance: number | null;
+  /** "road" = driving distance (Google-Maps-style route), "straight" = straight line. */
+  distanceType?: "road" | "straight" | "fixed";
+  driveTimeMinutes?: number | null;
+  straightLineKm?: number | null;
   reviews: number;
 }
 
@@ -96,6 +104,10 @@ export interface NearbyStation {
   stationName: string;
   address: string;
   distance: number;
+  /** "road" = driving distance (Google-Maps-style route), "straight" = straight line. */
+  distanceType?: "road" | "straight" | "fixed";
+  driveTimeMinutes?: number | null;
+  straightLineKm?: number | null;
   latitude: number;
   longitude: number;
   /** The fuel that was searched for, upper-case. */

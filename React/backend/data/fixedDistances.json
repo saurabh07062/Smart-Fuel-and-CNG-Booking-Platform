@@ -1,0 +1,14 @@
+{
+  "note": "TEMPORARY (demo): Google Maps driving distance from the origin below to each station -- Google's 'Fastest route', measured on Google Maps. Customers see these instead of a computed distance, whatever their own location. Set FIXED_DISTANCES=off, or delete this file, to go back to live road distances (services/station/roadDistance.js).",
+  "origin": { "name": "Sai Balaji Meadows Society, Raisoni College Rd, Wagholi, Pune", "lat": 18.5718294, "lng": 73.9840845 },
+  "measuredAt": "2026-09-19 18:45 IST",
+  "stations": {
+    "6aad5f93985b9ae2a2b15ad7": { "name": "Nayara Energy", "km": 2.1, "minutes": 10 },
+    "6aad5a0c985b9ae2a2b15ac0": { "name": "Bharat Petroleum Petrol Pump - Shree Service Station", "km": 2.3, "minutes": 13 },
+    "6aabb9028830bdc4c60f978b": { "name": "BALSKAR SIDDHESHWAR TULSHIRAM", "km": 3.9, "minutes": 13 },
+    "6aad6d5a13f4f297dd5a8031": { "name": "Torrent Gas CNG Station", "km": 3.9, "minutes": 13 },
+    "6aad6e7c13f4f297dd5a8034": { "name": "Maharashtra Natural Gas Ltd CNG Station", "km": 5.6, "minutes": 19 },
+    "6aad6f4713f4f297dd5a8038": { "name": "Urja Fuels CNG Station", "km": 5.6, "minutes": 19 },
+    "6aad6fe713f4f297dd5a803b": { "name": "Khandelwal nagar CNG pump", "km": 5.7, "minutes": 20 }
+  }
+}

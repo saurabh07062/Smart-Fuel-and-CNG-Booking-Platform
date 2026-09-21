@@ -1,0 +1,9 @@
+{
+  "appId": "com.fuelmart.customer",
+  "appName": "FuelMart",
+  "webDir": "www",
+  "server": {
+    "url": "http://10.179.108.160:5000/app/",
+    "cleartext": true
+  }
+}

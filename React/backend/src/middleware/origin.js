@@ -30,7 +30,10 @@ function originAllowed(req) {
 
 /** For routes that act on the session cookies themselves (refresh, logout). */
 function requireAllowedOriginForCookies(req, res, next) {
-  const carriesSession = Boolean(req.cookies?.[ACCESS_COOKIE] || req.cookies?.[REFRESH_COOKIE]);
+  // The shared pair or any tab's own (fm_access_<tab> / fm_refresh_<tab>).
+  const carriesSession = Object.keys(req.cookies || {}).some(
+    (name) => name === ACCESS_COOKIE || name === REFRESH_COOKIE || name.startsWith(`${ACCESS_COOKIE}_`) || name.startsWith(`${REFRESH_COOKIE}_`),
+  );
   if (!carriesSession || SAFE_METHODS.has(req.method) || originAllowed(req)) return next();
   return res.status(403).json({ msg: "Request origin not allowed", reason: "ORIGIN_NOT_ALLOWED" });
 }

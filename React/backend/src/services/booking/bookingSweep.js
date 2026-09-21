@@ -8,8 +8,9 @@
  *
  *   - a booking dated before today, still 'upcoming' or 'waitlisted' ->
  *     'expired' (the day is over; there is nothing left to attend)
- *   - a booking dated today whose slot ended more than GRACE_MINUTES ago,
- *     still 'upcoming' -> 'no_show', then the next waitlisted customer (if
+ *   - a booking dated today whose slot has ended (plus NO_SHOW_GRACE_MINUTES,
+ *     default 0) without the customer checking in, still 'upcoming' ->
+ *     'no_show' -- cancelled automatically, then the next waitlisted customer (if
  *     any) is promoted into the newly-freed capacity, same as a cancellation
  *
  * "Today" and slot times are India time (config/businessTime.js).
@@ -21,7 +22,14 @@ const { dateKey } = require("../../config/businessTime");
 const { slotEndInstant, isSlotElapsed } = require("../../config/booking");
 const lock = require("../core/lock");
 
-const GRACE_MINUTES = 30;
+/**
+ * Minutes after a slot ends before a customer who never checked in is
+ * cancelled as a no-show. 0: the moment the slot is over. Read per run.
+ */
+function noShowGraceMinutes() {
+  const v = Number(process.env.NO_SHOW_GRACE_MINUTES);
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
 
 /**
  * End time of a slot, in India time -- the same rule booking uses to decide a
@@ -76,7 +84,7 @@ async function sweepStaleBookings(io, { stationIds = null } = {}) {
 
   // Same-day no-shows: Mongo can't evaluate the timeSlot string format
   // inside a query, so fetch today's candidates and check each one in code.
-  const cutoff = new Date(Date.now() - GRACE_MINUTES * 60_000);
+  const cutoff = new Date(Date.now() - noShowGraceMinutes() * 60_000);
   // A car checked in and waiting at the pump (arrivalTime set) is not a no-show.
   const candidates = await Booking.find({
     ...scope,

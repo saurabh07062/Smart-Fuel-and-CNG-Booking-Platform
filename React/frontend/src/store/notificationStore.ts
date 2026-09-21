@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { fetchNotifications, type NotificationItem } from "@/services/api/customerApi";
+import { useAuthStore } from "./authStore";
 
 export interface UiNotification {
   id: string;
@@ -75,6 +76,11 @@ export const useNotificationStore = create<NotificationState>((set) => ({
    * authoritative read state.
    */
   load: async () => {
+    // /api/customer/notifications is customer-only; the reconnect resync runs
+    // for every visitor, so skip it for vendors, admins and signed-out tabs
+    // instead of collecting a 403/401 each time.
+    const { isAuthenticated, user } = useAuthStore.getState();
+    if (!isAuthenticated || user?.role !== "customer") return;
     try {
       const items = await fetchNotifications();
       set((s) => {

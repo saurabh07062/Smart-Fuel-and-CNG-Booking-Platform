@@ -162,6 +162,14 @@ exports.getAvailability = async (req, res) => {
     const fuel = normaliseFuel(fuelType);
     if (!fuel) return res.status(400).json({ msg: "fuelType must be Petrol, Diesel or CNG" });
     if (!parseDateKey(date)) return res.status(400).json({ msg: "date must be a YYYY-MM-DD date" });
+    const bookingRules = require("../config/booking");
+    if (bookingRules.isBeyondAdvanceWindow(date)) {
+      return res.status(400).json({
+        msg: `Bookings open only ${bookingRules.advanceBookingDays()} days ahead.`,
+        reason: "DATE_TOO_FAR",
+        lastBookableDate: bookingRules.lastBookableDate(),
+      });
+    }
 
     const station = await Station.findById(stationId).select("status operatingSchedule openingHours").lean();
     if (!station) return res.status(404).json({ msg: "Station not found" });
@@ -226,6 +234,17 @@ const VERIFY_WINDOW_MS = 15 * 60_000;
  * Completion goes through services/booking/bookingCompletion.js, which also deducts
  * the dispensed fuel from the station's stock.
  */
+/** "This booking is for tomorrow (Fri, 18 Sep) at 6:00 AM. Ask the customer to come back then." */
+function comeBackMessage(booking, today) {
+  const at = new Date(`${booking.bookingDate}T12:00:00Z`);
+  const tomorrow = new Date(`${today}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const label = at.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  const when = booking.bookingDate === tomorrow.toISOString().slice(0, 10) ? `tomorrow (${label})` : label;
+  const come = booking.bookingDate === tomorrow.toISOString().slice(0, 10) ? "come back tomorrow" : "come back on that day";
+  return `This booking is for ${when} at ${booking.timeSlot}. Ask the customer to ${come} at ${booking.timeSlot}.`;
+}
+
 exports.verifyBooking = async (req, res) => {
   const route = "POST /api/bookings/verify";
   try {
@@ -270,7 +289,7 @@ exports.verifyBooking = async (req, res) => {
     const today = dateKey();
     const notFound = () => {
       metrics.inc("verification_failed_count");
-      return res.status(404).json({ success: false, msg: "No matching booking at your station(s)." });
+      return res.status(404).json({ success: false, msg: "No booking at your station(s) uses this code. Check the 4 digits with the customer." });
     };
 
     let matches;
@@ -286,6 +305,29 @@ exports.verifyBooking = async (req, res) => {
       }).limit(2);
     }
 
+    // No booking today with this code: it may be a valid booking for another
+    // day (e.g. booked late at night for tomorrow's first slot). Say so instead
+    // of "no matching booking", which reads as a wrong code.
+    if (matches.length === 0 && !bookingId) {
+      const other = await Booking.findOne({
+        verificationCode: code,
+        status: { $in: ["upcoming", "serving"] },
+        ...scope,
+      })
+        .sort({ bookingDate: 1 })
+        .select("bookingDate timeSlot")
+        .lean();
+      if (other) {
+        metrics.inc("verification_failed_count");
+        return res.status(409).json({
+          success: false,
+          reason: other.bookingDate > today ? "NOT_TODAY" : "DATE_PASSED",
+          bookingDate: other.bookingDate,
+          timeSlot: other.timeSlot,
+          msg: other.bookingDate > today ? comeBackMessage(other, today) : "This booking's date has passed.",
+        });
+      }
+    }
     if (matches.length === 0) return notFound();
     if (matches.length > 1) {
       return res.status(409).json({
@@ -326,14 +368,12 @@ exports.verifyBooking = async (req, res) => {
     // fuel's service time has run, and that completion is when stock is
     // deducted (services/booking/bookingCompletion.js).
     const now = new Date();
-    // For a pay-at-station booking, check-in is also when the attendant collects.
-    const payment =
-      booking.payMethod === "station"
-        ? { paymentStatus: "paid", collectedAt: now, collectedBy: req.user.id }
-        : {};
+    // Check-in does not record the payment: a pay-at-station booking stays
+    // owed until the attendant says how it was paid (cash or UPI at the pump)
+    // through "Collect payment" (vendorPanelController.collectBookingPayment).
     let result;
     try {
-      result = await nozzleService.checkIn({ bookingId: booking._id, set: payment, now });
+      result = await nozzleService.checkIn({ bookingId: booking._id, now });
     } catch (lockErr) {
       if (lockErr.code === "LOCK_TIMEOUT" || lockErr.code === "LOCK_EXPIRED") {
         return res
@@ -402,6 +442,9 @@ exports.cancelBooking = async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ msg: "Booking not found" });
 
     const before = await currentStatus(req.params.id, { user: req.user.id });
+    // Optional: why the customer cancelled. Anything outside the list is ignored.
+    const CANCEL_REASONS = ["plans_changed", "wrong_slot", "too_far", "long_wait", "other"];
+    const cancelReason = CANCEL_REASONS.includes(req.body?.reason) ? req.body.reason : undefined;
 
     // One conditional write: if the booking stopped being "upcoming" or
     // "waitlisted" (the vendor started serving it, a sweep completed it)
@@ -413,7 +456,7 @@ exports.cancelBooking = async (req, res) => {
       filter: { user: req.user.id },
       // Who cancelled matters to the risk engine: only a customer's own
       // cancellations describe the customer's behaviour.
-      set: { cancelledAt: new Date(), cancelledBy: "customer" },
+      set: { cancelledAt: new Date(), cancelledBy: "customer", ...(cancelReason ? { cancelReason } : {}) },
     });
     if (!booking) {
       const status = await currentStatus(req.params.id, { user: req.user.id });

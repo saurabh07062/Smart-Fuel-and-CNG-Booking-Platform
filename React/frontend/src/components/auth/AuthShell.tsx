@@ -17,7 +17,7 @@ export default function AuthShell({
   return (
     <div
       className="min-h-screen flex flex-col justify-between"
-      style={{ background: "url('/bg-image.png') center/cover", position: "relative" }}
+      style={{ background: `url('${import.meta.env.BASE_URL}bg-image.png') center/cover`, position: "relative" }}
     >
       <div className="absolute inset-0" style={{ background: "rgba(11,17,32,0.7)" }} />
 

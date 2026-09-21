@@ -256,12 +256,33 @@ test("single-nozzle algorithm: exhaustive scenarios", async (t) => {
     // Dedicated date, kept free of every other test's fixtures, so this is a
     // clean "book 3 in a row, expect the 4th label back" check.
     const stackedDate = "2099-04-12";
-    await makeBooking({ fuel: "cng", label: "11:00 AM", onDate: stackedDate });
-    await makeBooking({ fuel: "cng", label: "11:30 AM", onDate: stackedDate });
-    await makeBooking({ fuel: "cng", label: "12:00 PM", onDate: stackedDate });
+    // A window holds floor(1800 / 300) = 6 CNG fills on the one CNG nozzle:
+    // fill three windows in a row completely.
+    for (const label of ["11:00 AM", "11:30 AM", "12:00 PM"]) {
+      const base = nozzleScheduler.parseStartDateTime(stackedDate, label).getTime();
+      await Booking.insertMany(
+        Array.from({ length: 6 }, (_, k) => ({
+          user: new mongoose.Types.ObjectId(),
+          station: stationA._id,
+          fuelType: "CNG",
+          quantity: 5,
+          price: 80,
+          amount: 400,
+          bookingDate: stackedDate,
+          timeSlot: label,
+          status: "upcoming",
+          resource: 1,
+          bookingStartTime: new Date(base + k * 300_000),
+          bookingEndTime: new Date(base + (k + 1) * 300_000),
+          serviceDurationSeconds: 300,
+        })),
+      );
+    }
 
     const next = await nozzleScheduler.findNextAvailableStart(stationA._id, "cng", stackedDate, "11:00 AM");
-    assert.equal(next, "12:30 PM", "must walk past all three stacked bookings to the first truly free label");
+    assert.equal(next, "12:30 PM", "must walk past all three full windows to the first one with room");
+    const partly = await nozzleScheduler.findNextAvailableStart(stationA._id, "petrol", stackedDate, "11:00 AM");
+    assert.equal(partly, "11:00 AM", "full CNG windows leave the Petrol nozzle free");
   });
 
   // -------------------------------------------------------------------
@@ -369,6 +390,8 @@ test("single-nozzle algorithm: exhaustive scenarios", async (t) => {
     });
 
     await t.test("HTTP: completing a booking frees the nozzle for a new overlapping request", async () => {
+      // All of 12:00 PM's Diesel positions but one are taken; b1 takes the last.
+      await require("./helpers/fillWindow").fillWindow({ stationId: stationA._id, fuelType: "Diesel", date: "2099-05-02", label: "12:00 PM", leaveFree: 1 });
       const b1 = await post(tokenFor(nextUser()), baseBody({ fuelType: "Diesel", timeSlot: "12:00 PM", bookingDate: "2099-05-02" }));
       assert.equal(b1.status, 200, JSON.stringify(b1.body));
       const bookingId = b1.body.booking._id;
@@ -412,11 +435,13 @@ test("single-nozzle algorithm: exhaustive scenarios", async (t) => {
       const data = await resp.json();
       const slot1200 = data.slots.find((s) => s.label === "12:00 PM");
       assert.ok(slot1200, "the availability grid must include the 12:00 PM label");
-      // The Diesel booking was completed then re-booked with Petrol in an
-      // earlier sub-test, so 12:00 PM is occupied again by that Petrol booking.
-      assert.equal(slot1200.available, false, "a slot with a real active booking must report unavailable");
+      // An earlier sub-test booked one Petrol fill at 12:00 PM: 44 of 45 remain.
+      assert.equal(slot1200.capacity.total, 45);
+      assert.equal(slot1200.capacity.reserved, 1, "the real booking is counted");
+      assert.equal(slot1200.capacity.available, 44, "a real active booking reduces what is left");
       const slot1230 = data.slots.find((s) => s.label === "12:30 PM");
       assert.equal(slot1230.available, true, "an untouched slot must report available");
+      assert.equal(slot1230.capacity.available, 45);
     });
   }
 

@@ -13,6 +13,7 @@ import { useVendorStore } from "@/store/vendorStore";
 import { useResync, useSocketEvent } from "@/hooks/useSocket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { coalesce } from "@/utils/coalesce";
+import { fetchVendorStations } from "@/services/api/vendorApi";
 
 /**
  * The vendor console -- port of renderVendorPanel() and its ten tabs.
@@ -29,9 +30,18 @@ export default function VendorPanel() {
   const error = useVendorStore((s) => s.error);
   const loadTab = useVendorStore((s) => s.loadTab);
 
-  // First paint loads the tab the console opens on.
+  // First paint loads the tab the console opens on. A vendor with no station
+  // yet (just approved) is taken to Stations, where the Add form opens.
   useEffect(() => {
     void loadTab("dashboard");
+    void fetchVendorStations()
+      .then((list) => {
+        const s = useVendorStore.getState();
+        if (list.length === 0 && s.tab === "dashboard") void s.setTab("stations");
+      })
+      .catch(() => {
+        /* stay on the dashboard; its own error state covers a failed load */
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -52,6 +62,9 @@ export default function VendorPanel() {
   useSocketEvent(SOCKET_EVENTS.QUEUE_UPDATED, refreshLive);
   useSocketEvent(SOCKET_EVENTS.SLOT_UPDATED, refreshLive);
   useSocketEvent(SOCKET_EVENTS.STATION_UPDATED, refreshLive);
+  // A station added or removed elsewhere (another tab, or an admin).
+  useSocketEvent(SOCKET_EVENTS.STATION_CREATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.STATION_DELETED, refreshLive);
   useSocketEvent(SOCKET_EVENTS.FUEL_PRICE_UPDATED, refreshLive);
   useSocketEvent(SOCKET_EVENTS.INVENTORY_UPDATED, refreshLive);
   // Events missed while disconnected are gone: refetch after a reconnect.

@@ -150,3 +150,4 @@ export function resolveDraftVehicle(
     saved: !!draft.vehicleId,
   };
 }
+

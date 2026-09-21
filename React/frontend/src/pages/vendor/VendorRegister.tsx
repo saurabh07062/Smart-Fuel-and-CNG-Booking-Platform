@@ -19,7 +19,9 @@ const STEP_COPY: Record<Step, [string, string]> = {
   4: ["Step 4: Review & Submit", "Check everything over, then send your application for approval."],
 };
 const STEP_LABELS = ["PROFILE", "SERVICES", "DOCUMENTS", "REVIEW"];
-const FUELS: Array<[string, string]> = [["petrol", "Petrol"], ["diesel", "Diesel"], ["cng", "CNG"], ["ev_charging", "EV Charging"]];
+import { FUEL_REQUIRED_MSG, toVendorFuels } from "@/utils/vendorFuels";
+
+const FUELS: Array<[string, string]> =[["petrol", "Petrol"], ["diesel", "Diesel"], ["cng", "CNG"], ["ev_charging", "EV Charging"]];
 
 const inputCls = "w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2";
 
@@ -69,7 +71,17 @@ export default function VendorRegister() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
+  // At least one of Petrol, Diesel, CNG -- the vendor panel shows only the fuels chosen here.
+  const [fuelError, setFuelError] = useState<string | null>(null);
+  const fuelsChosen = toVendorFuels(fuels).length > 0;
+
   function showStep(n: Step) {
+    if (n > 2 && !fuelsChosen) {
+      setFuelError(FUEL_REQUIRED_MSG);
+      setStep(2);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setStep(n);
     // Leaflet mis-measures a container that was hidden; re-measure when step 1 returns.
     if (n === 1) window.setTimeout(() => mapRef.current?.invalidateSize(), 60);
@@ -100,6 +112,10 @@ export default function VendorRegister() {
     if (step !== 4) {
       // Enter in a field before the last step advances, as before.
       showStep((step + 1) as Step);
+      return;
+    }
+    if (!fuelsChosen) {
+      showStep(4); // sends them back to step 2 with the message
       return;
     }
     setBusy(true);
@@ -329,22 +345,32 @@ export default function VendorRegister() {
 
               <div className={`space-y-4 ${step === 2 ? "" : "hidden"}`}>
                 <div>
-                  <label className="block text-xs font-bold mb-2">Provided Products (select all that apply)</label>
-                  <div className="flex gap-3">
+                  <label className="block text-xs font-bold mb-2">Provided Products * (select all that apply)</label>
+                  <div className="flex gap-3" role="group" aria-label="Provided Products">
                     {FUELS.map(([value, label]) => (
                       <label key={value}>
                         <input
                           type="checkbox"
                           value={value}
                           checked={fuels.includes(value)}
-                          onChange={(e) =>
-                            setFuels((p) => (e.target.checked ? [...p, value] : p.filter((x) => x !== value)))
-                          }
+                          onChange={(e) => {
+                            setFuelError(null);
+                            setFuels((p) => (e.target.checked ? [...p, value] : p.filter((x) => x !== value)));
+                          }}
                         />{" "}
                         {label}
                       </label>
                     ))}
                   </div>
+                  {fuelError ? (
+                    <p role="alert" className="text-xs mt-2 text-red-600">
+                      {fuelError}
+                    </p>
+                  ) : (
+                    <p className="text-xs mt-2 text-[var(--muted)]">
+                      Your vendor panel will show only the fuels you select here.
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

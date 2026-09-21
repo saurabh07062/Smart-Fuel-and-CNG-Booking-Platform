@@ -5,15 +5,22 @@ import EmptyState from "@/components/common/EmptyState";
 import Loader from "@/components/common/Loader";
 import ErrorMessage from "@/components/common/ErrorMessage";
 import StationCard from "@/components/station/StationCard";
+import FuelIcon from "@/components/station/FuelIcon";
 import StationsMap from "@/components/maps/StationsMap";
 import { useStationStore } from "@/store/stationStore";
 import { useWatchStations } from "@/hooks/useSocket";
+import { getLastKnownUserCoords } from "@/utils/geo";
+import { queueLevelOf } from "@/utils/format";
 
+// Each fuel has its own icon (components/station/FuelIcon.tsx).
 const FILTERS = [
-  ["all", "All Stations", "fa-gas-pump"],
-  ["petrol", "Petrol", "fa-droplet"],
-  ["cng", "CNG", "fa-fire"],
+  ["all", "All Stations"],
+  ["petrol", "Petrol"],
+  ["diesel", "Diesel"],
+  ["cng", "CNG"],
 ] as const;
+
+const FUEL_NAME = { petrol: "Petrol", diesel: "Diesel", cng: "CNG" } as const;
 
 const SORTS = [
   ["distance", "Nearest first"],
@@ -47,6 +54,9 @@ export default function Stations() {
   const rawQuery = params.get("q") ?? "";
   const query = rawQuery.trim().toLowerCase();
   const [sort, setSort] = useState<SortKey>("distance");
+  // Toggles on top of the fuel filter: only open stations, only short queues.
+  const [openOnly, setOpenOnly] = useState(false);
+  const [lowQueueOnly, setLowQueueOnly] = useState(false);
 
   useEffect(() => {
     void load();
@@ -55,14 +65,16 @@ export default function Stations() {
   const visible = useMemo(() => {
     let list = stations;
     if (filter !== "all") {
-      const want = filter === "cng" ? "CNG" : "Petrol";
+      const want = FUEL_NAME[filter];
       list = list.filter((s) => s.fuelTypes.includes(want));
     }
+    if (openOnly) list = list.filter((s) => s.open);
+    if (lowQueueOnly) list = list.filter((s) => queueLevelOf(s.queueStatus) === "low");
     if (query) {
       list = list.filter((s) => `${s.name} ${s.address} ${s.city ?? ""}`.toLowerCase().includes(query));
     }
 
-    const priceKey = filter === "cng" ? "CNG" : "Petrol";
+    const priceKey = filter === "all" ? "Petrol" : FUEL_NAME[filter];
     const sorted = [...list];
     if (sort === "distance") {
       sorted.sort(
@@ -75,7 +87,7 @@ export default function Stations() {
       sorted.sort((a, b) => (a.uiPrices[priceKey] ?? Infinity) - (b.uiPrices[priceKey] ?? Infinity));
     }
     return sorted;
-  }, [stations, filter, query, sort]);
+  }, [stations, filter, query, sort, openOnly, lowQueueOnly]);
 
   // Join every listed station's room, so a vendor's price change updates
   // these cards live. Watching the full list rather than the filtered one
@@ -100,17 +112,37 @@ export default function Stations() {
 
       <div className="cx-toolbar">
         <div className="flex gap-2 overflow-x-auto pb-0.5" role="group" aria-label="Fuel type">
-          {FILTERS.map(([val, label, icon]) => (
+          {FILTERS.map(([val, label]) => (
             <button
               key={val}
               type="button"
-              className={`cx-chip ${filter === val ? "is-on" : ""}`}
+              className={`cx-chip cx-fuel-chip ${filter === val ? "is-on" : ""}`}
               aria-pressed={filter === val}
               onClick={() => setFilter(val)}
             >
-              <i className={`fas ${icon}`} aria-hidden /> {label}
+              <span className={`cx-fuel-ico is-${val}`} aria-hidden>
+                <FuelIcon kind={val} size={val === "cng" ? 26 : 24} />
+              </span>
+              {label}
             </button>
           ))}
+          <span className="w-px self-stretch" style={{ background: "var(--border)" }} aria-hidden />
+          <button
+            type="button"
+            className={`cx-chip ${openOnly ? "is-on" : ""}`}
+            aria-pressed={openOnly}
+            onClick={() => setOpenOnly((v) => !v)}
+          >
+            <i className="fas fa-door-open" aria-hidden /> Open now
+          </button>
+          <button
+            type="button"
+            className={`cx-chip ${lowQueueOnly ? "is-on" : ""}`}
+            aria-pressed={lowQueueOnly}
+            onClick={() => setLowQueueOnly((v) => !v)}
+          >
+            <i className="fas fa-person-walking" aria-hidden /> Low queue
+          </button>
         </div>
 
         {query && (
@@ -158,7 +190,14 @@ export default function Stations() {
                       Clear search
                     </button>
                   ) : (
-                    <button className="btn btn-outline btn-sm" onClick={() => setFilter("all")}>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => {
+                        setFilter("all");
+                        setOpenOnly(false);
+                        setLowQueueOnly(false);
+                      }}
+                    >
                       Show All Stations
                     </button>
                   )
@@ -173,10 +212,11 @@ export default function Stations() {
         <div className="order-1 lg:order-2 lg:sticky lg:top-[88px]">
           <StationsMap
             stations={visible}
-            className="cx-map h-[240px] sm:h-[300px] lg:h-[calc(100vh-140px)] lg:min-h-[420px]"
+            className="h-[240px] sm:h-[300px] lg:h-[calc(100vh-140px)] lg:min-h-[420px]"
+            userCoords={getLastKnownUserCoords()}
           />
           <p className="text-[11px] mt-2 hidden lg:flex items-center gap-1.5" style={{ color: "var(--muted)" }}>
-            <i className="fas fa-circle-info" aria-hidden /> Blue pins are open, grey are closed. Select a pin
+            <i className="fas fa-circle-info" aria-hidden /> Red pins are open, grey are closed. Select a pin
             for station details.
           </p>
         </div>

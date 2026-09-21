@@ -34,14 +34,14 @@ test.after(async () => {
 // Pure
 // ---------------------------------------------------------------------------
 
-test("service time comes from the booked quantity", () => {
+test("service time comes from the booked quantity, within the fuel's range", () => {
   assert.deepEqual(
-    [10, 5, 8, 3].map((q) => getServiceDurationSeconds("Petrol", q)),
-    [40, 23, 33, 16],
-    "6 s + 3.4 s per litre",
+    [10, 5, 8, 3, 60].map((q) => getServiceDurationSeconds("Petrol", q)),
+    [40, 40, 40, 40, 40],
+    "Petrol: always 40 seconds",
   );
-  assert.equal(getServiceDurationSeconds("diesel", 10), 40);
-  assert.equal(getServiceDurationSeconds("CNG", 20), 300, "60 s + 12 s per kg");
+  assert.deepEqual([1, 8, 60].map((q) => getServiceDurationSeconds("diesel", q)), [40, 40, 40], "Diesel: always 40 seconds");
+  assert.deepEqual([1, 5, 20, 60].map((q) => getServiceDurationSeconds("CNG", q)), [300, 300, 300, 300], "CNG: always 5 minutes");
   assert.equal(getServiceDurationSeconds("petrol"), 40, "no quantity: a typical fill");
   assert.equal(getServiceDurationSeconds("cng"), 300);
   assert.ok(getServiceDurationSeconds("cng", 60) < 30 * 60, "the largest fill still fits inside a slot gap");
@@ -182,13 +182,13 @@ test("fuel queues against MongoDB", async (t) => {
       assert.equal(p.vehiclesWaiting, 3);
       assert.deepEqual(p.queue.map((q) => [q.status, q.quantity, q.serviceSeconds]), [
         ["serving", 10, 40],
-        ["waiting", 5, 23],
-        ["waiting", 8, 33],
-        ["waiting", 3, 16],
+        ["waiting", 5, 40],
+        ["waiting", 8, 40],
+        ["waiting", 3, 40],
       ]);
       assert.equal(p.you.vehiclesAhead, 4);
       assert.equal(p.you.serviceSeconds, 40);
-      near(p.you.estimatedWaitSeconds, 30 + 23 + 33 + 16, 2, "wait = remaining F101 + F102 + F103 + F104");
+      near(p.you.estimatedWaitSeconds, 30 + 40 + 40 + 40, 2, "wait = remaining F101 + F102 + F103 + F104");
       assert.equal(p.you.estimatedCompleteAt - p.you.estimatedStartAt, 40_000);
 
       const cng = await buildQueuePreview({ stationId: s._id, fuelType: "CNG", quantity: 10 });
@@ -228,7 +228,7 @@ test("fuel queues against MongoDB", async (t) => {
       const s = await makeStation("walkins");
       const first = await walkIns.addWalkIn({ stationId: s._id, fuelType: "Petrol", quantity: 5, vehicleNumber: "MH12CD5678" });
       assert.equal(first.status, "serving", "nozzle free: starts at once");
-      assert.equal(first.serviceDurationSeconds, 23);
+      assert.equal(first.serviceDurationSeconds, 40);
       const second = await walkIns.addWalkIn({ stationId: s._id, fuelType: "Petrol", quantity: 8 });
       assert.equal(second.status, "waiting");
       const cng = await walkIns.addWalkIn({ stationId: s._id, fuelType: "CNG", quantity: 10 });

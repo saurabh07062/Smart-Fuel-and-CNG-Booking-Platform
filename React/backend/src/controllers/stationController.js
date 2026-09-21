@@ -166,6 +166,38 @@ exports.getAllStations = async (req, res) => {
       };
     });
 
+    // Road distance (driving, as Google Maps measures it) where a route is
+    // known; the straight line stays for the rest.
+    if (hasUserCoords) {
+      const withCoords = enriched.filter((e) => e.coordinates);
+      const routed = await require("../services/station/roadDistance").withRoadDistance(
+        { lat: userLat, lng: userLng },
+        withCoords.map((e) => ({ coordinates: e.coordinates, distanceKm: e.distance })),
+      );
+      withCoords.forEach((e, i) => {
+        const r = routed[i];
+        e.distanceType = r.distanceType;
+        e.distanceSource = r.distanceSource || null;
+        e.straightLineKm = e.distance;
+        if (r.distanceType === "road") {
+          e.distance = parseFloat(r.distanceKm.toFixed(2));
+          e.driveTimeMinutes = Number.isFinite(r.driveTimeMinutes) ? Math.round(r.driveTimeMinutes) : null;
+        }
+      });
+    }
+
+    // TEMPORARY (demo): a station with a fixed Google Maps distance shows it
+    // (services/station/fixedDistance.js).
+    const { fixedDistanceFor } = require("../services/station/fixedDistance");
+    for (const e of enriched) {
+      const fixed = fixedDistanceFor(e.id);
+      if (!fixed) continue;
+      e.distance = fixed.km;
+      e.distanceType = "fixed";
+      e.distanceSource = "google";
+      e.driveTimeMinutes = fixed.minutes;
+    }
+
     // If coordinates were passed, sort by distance ascending
     if (hasUserCoords) {
       enriched.sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
@@ -209,6 +241,27 @@ exports.getNearbyStations = async (req, res) => {
     const lng = parseCoord(longitude);
     const fuelLower = normaliseFuel(fuelType);
 
+    // The same order as the app: the location first ("Use my location"),
+    // then the fuel. Each missing step gets its own answer, so the website and
+    // the Android app can tell the customer exactly what to do next.
+    const blank = (v) => v === undefined || v === null || String(v).trim() === "";
+    if (blank(latitude) || blank(longitude)) {
+      return res.status(400).json({ success: false, reason: "LOCATION_REQUIRED", msg: "Set your location first: tap \"Use my location\"." });
+    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return res.status(400).json({ success: false, reason: "LOCATION_INVALID", msg: "That location is not valid. Tap \"Use my location\" again." });
+    }
+    // (0, 0) is what a device reports when it has no fix, not a real place.
+    if (lat === 0 && lng === 0) {
+      return res.status(400).json({ success: false, reason: "LOCATION_INVALID", msg: "That location is not valid. Tap \"Use my location\" again." });
+    }
+    if (blank(fuelType)) {
+      return res.status(400).json({ success: false, reason: "FUEL_REQUIRED", msg: "Choose a fuel: Petrol or CNG." });
+    }
+    if (!fuelLower) {
+      return res.status(400).json({ success: false, reason: "FUEL_INVALID", msg: "Fuel must be Petrol, Diesel or CNG." });
+    }
+
     let search;
     try {
       search = await discovery.findStationsForFuel(
@@ -220,6 +273,14 @@ exports.getNearbyStations = async (req, res) => {
       throw err;
     }
     const requestedFuelType = fuelLower.toUpperCase();
+    // Driving distance along the roads, as Google Maps measures a route --
+    // not the straight line the search itself uses to pick nearby stations.
+    search.stations = await require("../services/station/roadDistance").withRoadDistance({ lat, lng }, search.stations);
+    // TEMPORARY (demo): fixed Google Maps distances where set (services/station/fixedDistance.js).
+    search.stations = search.stations.map((st) => {
+      const fixed = require("../services/station/fixedDistance").fixedDistanceFor(st._id);
+      return fixed ? { ...st, distanceKm: fixed.km, distanceType: "fixed", distanceSource: "google", driveTimeMinutes: fixed.minutes } : st;
+    });
 
     // Optional: how much the customer intends to buy, so stock is judged
     // against it. Without it, a station only needs some stock.
@@ -310,6 +371,46 @@ exports.getNearestStations = async (req, res) => {
   } catch (err) {
     console.error("KNN Nearest Error:", err);
     res.status(500).json({ msg: "Server error calculating nearest stations" });
+  }
+};
+
+/**
+ * GET /api/stations/:id/route?lat=..&lng=..
+ * Driving distance along the roads from that point to the station, as Google
+ * Maps measures a route; the straight line when no route is available
+ * (distanceType says which).
+ */
+exports.getRouteDistance = async (req, res) => {
+  try {
+    const mongoose = require("mongoose");
+    const geo = require("../services/algorithms/geo");
+    const parse = (v) => (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN);
+    const from = { lat: parse(req.query.lat), lng: parse(req.query.lng) };
+    if (!geo.isCoord(from)) return res.status(400).json({ msg: "lat and lng must be valid coordinates" });
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ msg: "Station not found" });
+
+    const station = await Station.findById(req.params.id).select("coordinates location").lean();
+    const at = station ? Station.hydrate(station).latLng() : null;
+    if (!at) return res.status(404).json({ msg: "Station location not known" });
+
+    const straight = geo.haversineKm(from, at);
+    // TEMPORARY (demo): a fixed Google Maps distance wins (services/station/fixedDistance.js).
+    const fixed = require("../services/station/fixedDistance").fixedDistanceFor(req.params.id);
+    if (fixed) {
+      return res.json({ distanceKm: fixed.km, distanceType: "fixed", distanceSource: "google", straightLineKm: Math.round(straight * 100) / 100 });
+    }
+    const [routed] = await require("../services/station/roadDistance").withRoadDistance(from, [
+      { coordinates: at, distanceKm: straight },
+    ]);
+    res.json({
+      distanceKm: Math.round(routed.distanceKm * 100) / 100,
+      distanceType: routed.distanceType,
+      distanceSource: routed.distanceSource || null,
+      straightLineKm: Math.round(straight * 100) / 100,
+    });
+  } catch (err) {
+    console.error("Route distance error:", err);
+    res.status(500).json({ msg: "Could not work out the distance" });
   }
 };
 
@@ -410,13 +511,12 @@ exports.deleteStation = async (req, res) => {
     const station = await Station.findById(req.params.id);
     if (!station) return res.status(404).json({ msg: "Station not found" });
 
-    const stationId = station._id.toString();
-    await station.deleteOne();
+    // This used to remove only the station document, leaving its bookings,
+    // stock history, staff and photos behind. Same full removal as the vendor
+    // panel now (services/station/stationRemoval.js), including the live event.
+    const result = await require("../services/station/stationRemoval").removeStations([station._id]);
 
-    // Real-time: notify customers of station removal
-    emitStationEvent(req, "station_deleted", { id: stationId });
-
-    res.json({ msg: "Station removed successfully" });
+    res.json({ msg: "Station removed successfully", ...result });
   } catch (err) {
     console.error("Delete Station Error:", err);
     res.status(500).json({ msg: "Server error while deleting station" });

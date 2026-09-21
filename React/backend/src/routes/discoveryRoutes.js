@@ -135,6 +135,7 @@ router.get("/stations/:id/queue-preview", async (req, res) => {
       quantity,
       slotStart: timeSlot ? nozzleScheduler.parseStartDateTime(date, timeSlot) : null,
       bookingDate: date,
+      timeSlot,
     });
     res.json({ ...preview, stationName: station.name, stationActive: station.status === "Active", date, timeSlot });
   } catch (err) {
@@ -149,9 +150,23 @@ router.get("/stations/:id/queue-preview", async (req, res) => {
  * Runs the M/M/c model on caller-supplied numbers without touching the DB.
  * The vendor "what if I open another nozzle" planner uses this.
  */
+const SIMULATE_MAX_NOZZLES = 50;
 router.post("/simulate-wait", (req, res) => {
   const { arrivalRatePerHour, serviceRatePerHour, nozzles, position, avgServiceMinutes } =
     req.body || {};
+
+  // Public and unauthenticated: the M/M/c maths loops once per nozzle, so an
+  // unbounded count would block the event loop for every other request.
+  const inRange = (v, min, max) => v === undefined || (Number.isFinite(Number(v)) && Number(v) >= min && Number(v) <= max);
+  if (
+    !inRange(nozzles, 1, SIMULATE_MAX_NOZZLES) ||
+    !inRange(arrivalRatePerHour, 0, 10_000) ||
+    !inRange(serviceRatePerHour, 0, 10_000) ||
+    !inRange(position, 0, 10_000) ||
+    !inRange(avgServiceMinutes, 0, 1_440)
+  ) {
+    return res.status(400).json({ msg: `Out of range: nozzles 1-${SIMULATE_MAX_NOZZLES}, rates up to 10000/hour, position up to 10000.` });
+  }
 
   const steadyState = mmcWaitMinutes({
     arrivalRatePerHour: Number(arrivalRatePerHour),
@@ -189,7 +204,11 @@ function toDiscoveryDTO(s) {
     id: String(s._id),
     name: s.name,
     address: s.address,
-    coordinates: s.coordinates,
+    // The station's saved position from whichever shape it is stored in: the
+    // legacy {lat,lng}, else the GeoJSON location. Copying only `coordinates`
+    // gave a station stored with just `location` no position here, and so no
+    // map pin and no Directions button.
+    coordinates: positionOf(s),
     // kNearest recomputes distance via Haversine, so round at the edge rather
     // than upstream — otherwise full float precision leaks into the response.
     distanceKm: round2(s.distanceKm),
@@ -204,10 +223,20 @@ function toDiscoveryDTO(s) {
     amenities: s.amenities,
     rating: s.rating,
     images: s.images,
+    pumpImages: s.pumpImages,
     openingHours: s.openingHours,
     score: round3(s.score),
     scoreBreakdown: s.scoreBreakdown,
   };
+}
+
+function positionOf(s) {
+  const { isRealPosition } = require("../models/Station");
+  const c = s.coordinates;
+  if (c && isRealPosition(Number(c.lat), Number(c.lng))) return { lat: Number(c.lat), lng: Number(c.lng) };
+  const g = s.location?.coordinates;
+  if (Array.isArray(g) && g.length === 2 && isRealPosition(Number(g[1]), Number(g[0]))) return { lat: Number(g[1]), lng: Number(g[0]) };
+  return null;
 }
 
 const round2 = (n) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : null);

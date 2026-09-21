@@ -11,6 +11,19 @@ const { storedPath, removeUploadedFile } = require("../middleware/upload");
 const realtime = require("../services/notification/realtime");
 const notifications = require("../services/notification/notifications");
 
+/**
+ * Publish every station of a vendor after a bulk status change (suspend,
+ * reactivate). Station.updateMany sends no event of its own.
+ */
+async function announceStationsOf(vendorId) {
+  try {
+    const stations = await Station.find({ owner: vendorId });
+    for (const station of stations) realtime.stationChanged(realtime.EVENTS.STATION_UPDATED, station);
+  } catch (err) {
+    console.error("[vendor] could not publish station status changes:", err.message);
+  }
+}
+
 // ============================================================
 // VENDOR DASHBOARD STATS
 // Returns all metrics for the Admin Vendor Management dashboard
@@ -208,7 +221,7 @@ exports.getDashboardStats = async (req, res) => {
     });
   } catch (err) {
     console.error("[Vendor Dashboard] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -300,7 +313,7 @@ exports.getAllVendors = async (req, res) => {
     res.json(enrichedVendors);
   } catch (err) {
     console.error("[Get Vendors] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -352,7 +365,7 @@ exports.getVendorById = async (req, res) => {
     });
   } catch (err) {
     console.error("[Get Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -462,7 +475,7 @@ exports.approveVendor = async (req, res) => {
     });
   } catch (err) {
     console.error("[Approve Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -503,6 +516,9 @@ exports.reissueSecretCode = async (req, res) => {
       console.error("[Reissue Secret Code] email failed:", mailErr.message);
     }
 
+    // A reissued code deactivates the vendor until they enter it.
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor);
+
     res.json({
       msg: emailed
         ? `A new secret code has been emailed to ${vendor.email}. Any previous code no longer works.`
@@ -512,7 +528,7 @@ exports.reissueSecretCode = async (req, res) => {
     });
   } catch (err) {
     console.error("[Reissue Secret Code] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -537,11 +553,12 @@ exports.rejectVendor = async (req, res) => {
     await vendor.save();
 
     emailService.sendVendorStatusEmail(vendor, "rejected", vendor.rejectionReason).catch(() => {});
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor, { rejectionReason: vendor.rejectionReason });
 
     res.json({ msg: "Vendor rejected successfully", vendor });
   } catch (err) {
     console.error("[Reject Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -570,13 +587,17 @@ exports.suspendVendor = async (req, res) => {
       { owner: vendor._id },
       { status: "Inactive" },
     );
+    // The bulk update sends no events by itself: customers would keep seeing
+    // these stations open until they refreshed.
+    await announceStationsOf(vendor._id);
 
     emailService.sendVendorStatusEmail(vendor, "suspended", vendor.rejectionReason).catch(() => {});
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor);
 
     res.json({ msg: "Vendor suspended successfully", vendor });
   } catch (err) {
     console.error("[Suspend Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -608,11 +629,12 @@ exports.markUnderReview = async (req, res) => {
     await vendor.save();
 
     emailService.sendVendorStatusEmail(vendor, "under_review").catch(() => {});
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor);
 
     res.json({ msg: "Vendor marked as under review", vendor });
   } catch (err) {
     console.error("[Mark Under Review] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -640,13 +662,15 @@ exports.reactivateVendor = async (req, res) => {
       { owner: vendor._id },
       { status: "Active" },
     );
+    await announceStationsOf(vendor._id);
 
     emailService.sendVendorStatusEmail(vendor, "reactivated").catch(() => {});
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor);
 
     res.json({ msg: "Vendor reactivated successfully", vendor });
   } catch (err) {
     console.error("[Reactivate Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -698,10 +722,11 @@ exports.updateVendor = async (req, res) => {
       return res.status(404).json({ msg: "Vendor not found" });
     }
 
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor);
     res.json({ msg: "Vendor updated successfully", vendor });
   } catch (err) {
     console.error("[Update Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -719,14 +744,17 @@ exports.deleteVendor = async (req, res) => {
       return res.status(404).json({ msg: "Vendor not found" });
     }
 
-    // Delete stations owned by vendor
-    await Station.deleteMany({ owner: vendor._id });
+    // Their stations, with everything that belongs to each (bookings, stock and
+    // price history, staff, walk-ins, notifications, photos).
+    const owned = await Station.find({ owner: vendor._id }).select("_id").lean();
+    await require("../services/station/stationRemoval").removeStations(owned.map((s) => s._id));
     await User.findByIdAndDelete(vendor._id);
+    realtime.vendorChanged(realtime.EVENTS.VENDOR_STATUS_CHANGED, vendor, { vendorStatus: "deleted" });
 
     res.json({ msg: "Vendor deleted successfully" });
   } catch (err) {
     console.error("[Delete Vendor] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -769,6 +797,15 @@ exports.registerVendor = async (req, res) => {
       return res.status(400).json({ msg: "Please provide name, email, password and business name" });
     }
 
+    // "Provided Products": which fuels the station sells. It used to be sent
+    // and ignored; the vendor panel now shows only these fuels.
+    const fuelChoice = require("../services/vendor/vendorFuels").parseVendorFuels(
+      body.products ?? body.vendorFuelTypes ?? body.fuelTypes,
+    );
+    if (fuelChoice.error) {
+      return res.status(400).json({ msg: fuelChoice.error, field: "products" });
+    }
+
     // The approval email -- and therefore the vendor's only copy of their
     // secret code -- goes to this address. A typo here is not cosmetic: it
     // silently strands the vendor with no way to reach their own account.
@@ -782,7 +819,7 @@ exports.registerVendor = async (req, res) => {
       });
     }
 
-    let user = await User.findOne(require("../utils/email").emailLookup(email));
+    let user = await require("../utils/email").findUserByEmail(email);
     if (user) {
       return res
         .status(400)
@@ -800,6 +837,7 @@ exports.registerVendor = async (req, res) => {
       phone,
       vendorAddress,
       vendorDescription,
+      vendorFuelTypes: fuelChoice.fuels,
       ...(registrationLocation ? { registrationLocation } : {}),
       isVerified: true,
     });
@@ -829,6 +867,14 @@ exports.registerVendor = async (req, res) => {
 
     await user.save();
 
+    // Admins' Vendor Management shows the new application without a refresh.
+    realtime.toAdmins(realtime.EVENTS.VENDOR_REQUEST_CREATED, {
+      vendorId: String(user._id),
+      name: user.name,
+      businessName: user.businessName,
+      vendorStatus: user.vendorStatus,
+    });
+
     // No session: a pending vendor cannot use the panel, and signing them in
     // would replace whatever session this browser already has. They sign in
     // once approved, with their emailed secret code.
@@ -842,6 +888,7 @@ exports.registerVendor = async (req, res) => {
         vendorStatus: user.vendorStatus,
         vendorCode: user.vendorCode,
         businessName: user.businessName,
+        vendorFuelTypes: user.vendorFuelTypes,
       },
     });
   } catch (err) {
@@ -851,7 +898,7 @@ exports.registerVendor = async (req, res) => {
         .status(400)
         .json({ msg: "An account with this email already exists." });
     }
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };
 
@@ -882,6 +929,6 @@ exports.getVendorStatusCounts = async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[Vendor Status Counts] Error:", err.message);
-    res.status(500).json({ msg: "Server error: " + err.message });
+    res.status(500).json({ msg: "Server error. Please try again." });
   }
 };

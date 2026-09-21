@@ -111,7 +111,7 @@ test("booking against the live nozzle, against MongoDB", async (t) => {
     });
 
   try {
-    await t.test(`a Petrol fill running into ${L} makes ${L} unbookable on the Petrol nozzle until it is released`, async () => {
+    await t.test(`a Petrol fill running into ${L} pushes ${L}'s first position past its release`, async () => {
       const s = await makeStation("overrun");
       const slotWindow = nozzleScheduler.computeWindow("Petrol", startOf(L));
       const cngWindow = nozzleScheduler.computeWindow("CNG", startOf(L));
@@ -131,14 +131,20 @@ test("booking against the live nozzle, against MongoDB", async (t) => {
         false,
         "the CNG nozzle is a different nozzle: a Petrol fill never blocks it",
       );
-      assert.equal((await rowFor(s, L)).reason, "RESERVED", "the availability grid shows it");
-      await assert.rejects(bookSlot(s, customers[1], L), { reason: "SLOT_FULL" }, "booking refuses it on the backend");
+      // The fill holds the nozzle until L + 140 s: the window keeps the rest.
+      const L0 = startOf(L).getTime();
+      const busyRow = await rowFor(s, L);
+      assert.equal(busyRow.bookable, true);
+      assert.equal(busyRow.start.getTime(), L0 + 140_000, "the first position starts when the fill is released");
+      assert.equal(busyRow.capacity.available, 41, "floor((1800 - 140) / 40)");
+      const b = await bookSlot(s, customers[1], L);
+      assert.equal(new Date(b.bookingStartTime).getTime(), L0 + 140_000, "booking gets that exact position");
+      await transitionBooking({ bookingId: b._id, to: "cancelled" });
 
       assert.ok(await completeBooking({ bookingId: filling._id, fromStatuses: ["serving"] }));
-      assert.equal((await rowFor(s, L)).bookable, true, "released: bookable again");
-      const b = await bookSlot(s, customers[1], L);
-      assert.equal(b.status, "upcoming");
-      await transitionBooking({ bookingId: b._id, to: "cancelled" });
+      const freeRow = await rowFor(s, L);
+      assert.equal(freeRow.start.getTime(), L0, "released: the window starts at its own start again");
+      assert.equal(freeRow.capacity.available, 45);
     });
 
     await t.test("a car waiting at the pump holds the nozzle for its projected turn", async () => {
@@ -157,8 +163,14 @@ test("booking against the live nozzle, against MongoDB", async (t) => {
         arrivalTime: new Date(),
         serviceDurationSeconds: 200,
       });
-      assert.equal((await rowFor(s, L)).reason, "RESERVED");
-      await assert.rejects(bookSlot(s, customers[4], L), { reason: "SLOT_FULL" });
+      // Its projected turn is L - 10 s to L + 190 s.
+      const L0 = startOf(L).getTime();
+      const row = await rowFor(s, L);
+      assert.equal(row.start.getTime(), L0 + 190_000);
+      assert.equal(row.capacity.available, 40, "floor((1800 - 190) / 40)");
+      const placed = await bookSlot(s, customers[4], L);
+      assert.equal(new Date(placed.bookingStartTime).getTime(), L0 + 190_000);
+      await transitionBooking({ bookingId: placed._id, to: "cancelled" });
       const cngWindow = nozzleScheduler.computeWindow("CNG", startOf(L));
       assert.equal(
         await nozzleScheduler.hasOverlap(s._id, cngWindow.start, cngWindow.end, undefined, { fuelType: "CNG" }),
@@ -171,7 +183,9 @@ test("booking against the live nozzle, against MongoDB", async (t) => {
       assert.equal(await nozzleScheduler.hasOverlap(s._id, slotWindow.start, slotWindow.end, waiting._id, { fuelType: "Petrol" }), false);
 
       await transitionBooking({ bookingId: waiting._id, to: "cancelled" });
-      assert.equal((await rowFor(s, L)).bookable, true, "the waiting car left: L is free again");
+      const after = await rowFor(s, L);
+      assert.equal(after.start.getTime(), startOf(L).getTime(), "the waiting car left: L starts at its own start again");
+      assert.equal(after.capacity.available, 45);
     });
   } finally {
     await Booking.deleteMany({ station: { $in: stationIds } });

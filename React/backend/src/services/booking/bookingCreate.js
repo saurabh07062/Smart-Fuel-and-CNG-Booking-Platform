@@ -146,6 +146,17 @@ function validateInput(body = {}) {
     throw new BookingError(400, "INVALID_DATE", "bookingDate must be a YYYY-MM-DD date.");
   }
 
+  // Bookings are taken only a few days ahead (config/booking.js ADVANCE_BOOKING_DAYS).
+  const bookingRules = require("../../config/booking");
+  if (bookingRules.isBeyondAdvanceWindow(bookingDate)) {
+    const days = bookingRules.advanceBookingDays();
+    throw new BookingError(
+      400,
+      "DATE_TOO_FAR",
+      `Bookings open only ${days} day${days === 1 ? "" : "s"} ahead. Choose a date up to ${bookingRules.lastBookableDate()}.`,
+    );
+  }
+
   const timeSlot = String(body.timeSlot || "");
   if (!BOOKABLE_SLOT_LABELS.includes(timeSlot)) {
     throw new BookingError(400, "INVALID_SLOT", "Choose one of the listed time slots.");
@@ -299,7 +310,7 @@ async function createWithinGuards({ user, input, body, attemptId }) {
   // ---- 2. station facts, from the database --------------------------------
   const [station, customer] = await Promise.all([
     Station.findById(stationId)
-      .select("name status fuelTypes fuelAvailability prices inventory owner operatingSchedule openingHours")
+      .select("name status fuelTypes fuelAvailability nozzleConfig prices inventory owner operatingSchedule openingHours")
       .lean(),
     User.findById(user.id).select("name email phone").lean(),
   ]);
@@ -317,6 +328,11 @@ async function createWithinGuards({ user, input, body, attemptId }) {
   }
   if (station.fuelAvailability?.[fuel] === false) {
     throw new BookingError(409, "FUEL_UNAVAILABLE", `${label} is currently unavailable at this station.`);
+  }
+  // The vendor set this fuel's nozzle to walk-ins only (config/nozzleModes.js).
+  const nozzleModes = require("../../config/nozzleModes");
+  if (!nozzleModes.acceptsOnline(station, fuel)) {
+    throw new BookingError(409, "NOZZLE_OFFLINE_ONLY", nozzleModes.walkInOnlyMessage(fuel));
   }
   // The station's own opening hours for that day (models/Station.js).
   if (!Station.scheduleAllowsSlot(station, bookingDate, timeSlot)) {
@@ -337,9 +353,11 @@ async function createWithinGuards({ user, input, body, attemptId }) {
     throw new BookingError(409, "INVENTORY_UNAVAILABLE", `${label} stock is not tracked at this station.`);
   }
 
-  // ---- 3. the nozzle window ----------------------------------------------
+  // ---- 3. the booking window ----------------------------------------------
+  // The label is a 30-minute window; the booking's exact start and nozzle are
+  // allocated inside it under the fuel's lock (services/queue/nozzleScheduler.js).
+  // Its length is THIS fill's service time: the quantity decides it.
   const start = nozzleScheduler.parseStartDateTime(bookingDate, timeSlot);
-  // The window lasts as long as THIS fill: its quantity decides the service time.
   const window = start ? nozzleScheduler.computeWindow(fuel, start, quantity) : null;
   if (!window) {
     throw new BookingError(400, "INVALID_SLOT", `Could not understand the requested time slot '${timeSlot}'.`);
@@ -376,13 +394,18 @@ async function createWithinGuards({ user, input, body, attemptId }) {
       );
     }
 
-    // Only this fuel's nozzle: Petrol, Diesel and CNG are separate lines.
-    const nozzleTaken = await nozzleScheduler.hasOverlap(stationId, window.start, window.end, undefined, { fuelType: fuel });
-    if (nozzleTaken && !joinWaitlist) {
+    // The earliest free position in the window on any of this fuel's app
+    // nozzles, around every reservation and the nozzles' live use. Only this
+    // fuel: Petrol, Diesel and CNG have separate nozzles.
+    await require("../core/schedulingIndexes").ensureSchedulingIndexes();
+    const position = await nozzleScheduler.allocateInWindow(stationId, fuel, bookingDate, timeSlot, { quantity, station });
+    if (!position && !joinWaitlist) {
       metrics.inc("booking_conflict_count");
-      throw new BookingError(400, "SLOT_FULL", "This nozzle is reserved at your requested time.");
+      throw new BookingError(400, "SLOT_FULL", "Every nozzle is fully booked in this time window.");
     }
-    const waitlisted = nozzleTaken && joinWaitlist;
+    const waitlisted = !position && joinWaitlist;
+    // A waitlisted booking keeps the window's own start until it is promoted.
+    const placed = position || { start: window.start, end: window.end, resource: null };
 
     const doc = new Booking({
       user: user.id,
@@ -397,10 +420,11 @@ async function createWithinGuards({ user, input, body, attemptId }) {
       amount: pricing.amount,
       bookingDate,
       timeSlot,
-      startTime: formatHHMM(window.start),
-      endTime: formatHHMM(window.end),
-      bookingStartTime: window.start,
-      bookingEndTime: window.end,
+      startTime: formatHHMM(placed.start),
+      endTime: formatHHMM(placed.end),
+      bookingStartTime: placed.start,
+      bookingEndTime: placed.end,
+      resource: placed.resource,
       serviceDurationSeconds: window.durationSeconds,
       vehiclePlate: body.vehiclePlate ? String(body.vehiclePlate).trim().slice(0, 20) : undefined,
       ...normaliseVehicleSnapshot(body),
@@ -444,6 +468,22 @@ async function createWithinGuards({ user, input, body, attemptId }) {
 
     try {
       await doc.save();
+      // The lock serialised this fuel's bookings; if it was lost mid-way,
+      // another server may have placed an overlapping booking on the same
+      // nozzle. Check after the write and back out rather than double-book.
+      if (!waitlisted) {
+        const clash = await nozzleScheduler.hasOverlap(stationId, placed.start, placed.end, doc._id, {
+          fuelType: fuel,
+          resource: placed.resource,
+        });
+        if (clash) {
+          await Booking.deleteOne({ _id: doc._id });
+          metrics.inc("booking_db_guard_count");
+          const e = new Error("overlap after write");
+          e.code = 11000;
+          throw e;
+        }
+      }
       if (waitlisted) {
         waitlist.enqueue(stationId, { bookingId: String(doc._id), user: String(user.id) }, doc.waitlistPriority);
         metrics.inc("booking_waitlisted_count");

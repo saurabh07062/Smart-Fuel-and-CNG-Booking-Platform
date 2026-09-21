@@ -16,7 +16,7 @@
  * Both run under that fuel's nozzle lock (services/core/lock.js -- the same
  * lock booking creation takes). MongoDB refuses a second "serving" booking for
  * one station and fuel (models/Booking.js uniq_serving_per_station_fuel) and a
- * second serving walk-in (models/WalkIn.js); a booking and a walk-in at once is
+ * second serving walk-in per nozzle (models/WalkIn.js); a booking and a walk-in at once is
  * prevented by the lock. Two attendants scanning at once, two server instances
  * or an expired lock still cannot put two cars on one nozzle.
  */
@@ -30,7 +30,24 @@ const { getServiceDurationSeconds } = require("../../config/fuelDurations");
 const { FUEL_KEYS, normaliseFuel, fuelLabel } = require("../../config/fuels");
 const { dateKey } = require("../../config/businessTime");
 
+const Station = require("../../models/Station");
+const nozzleSetup = require("../../config/nozzleModes");
+
 const LOCK_OPTS = { ttlMs: 10_000, maxWaitMs: 3_000 };
+
+/**
+ * How this fuel's nozzles are split (config/nozzleModes.js): `resources` app
+ * nozzles for bookings (at least 1 here, so a vehicle already checked in is
+ * always served); `separate` when walk-ins have their own `lanes` nozzles.
+ */
+async function laneSetup(stationId, fuelType) {
+  const station = await Station.findById(stationId).select("nozzleConfig").lean();
+  const lanes = nozzleSetup.offlineNozzles(station, fuelType);
+  return { separate: lanes >= 1, lanes, resources: Math.max(1, nozzleSetup.onlineResources(station, fuelType)) };
+}
+
+/** The lock for one fuel's walk-in nozzles at one station. */
+const walkInLanesKey = (stationId, fuelType) => `lock:walkin-lanes:${stationId}:${normaliseFuel(fuelType) || "unknown"}`;
 
 /** The lock for one fuel's nozzle at one station. */
 const nozzleKey = (stationId, fuelType) => `lock:nozzle:${stationId}:${normaliseFuel(fuelType) || "unknown"}`;
@@ -47,17 +64,57 @@ function releaseAt(booking) {
   return new Date(new Date(booking.fuelingStartTime).getTime() + serviceSecondsOf(booking) * 1000);
 }
 
-/** The vehicle at this fuel's nozzle now -- a booking or a walk-in -- or null. */
-async function servingAt(stationId, fuelType) {
+/**
+ * The vehicles at this fuel's app nozzles now, by nozzle number: bookings
+ * being served and walk-ins sharing an app nozzle. A vehicle from before
+ * nozzles were numbered counts as nozzle 1.
+ * @returns {Promise<{resources:number, byResource:Map<number,object>}>}
+ */
+async function appNozzleUse(stationId, fuelType) {
   const label = fuelLabel(fuelType);
-  const booking = await Booking.findOne({ station: stationId, fuelType: label, status: "serving" })
-    .select("_id fuelType quantity serviceDurationSeconds fuelingStartTime")
-    .lean();
-  if (booking) return booking;
-  const walkIn = await WalkIn.findOne({ station: stationId, fuelType: label, status: "serving" })
-    .select("_id fuelType quantity serviceDurationSeconds fuelingStartTime")
-    .lean();
-  return walkIn ? { ...walkIn, kind: "walkin" } : null;
+  const { separate, resources } = await laneSetup(stationId, fuelType);
+  const [bookings, walkIns] = await Promise.all([
+    Booking.find({ station: stationId, fuelType: label, status: "serving" })
+      .select("_id fuelType quantity serviceDurationSeconds fuelingStartTime resource")
+      .lean(),
+    // With walk-in nozzles, only a walk-in still on an app nozzle (lane 0)
+    // occupies one; otherwise walk-ins share the app nozzles.
+    WalkIn.find({
+      station: stationId,
+      fuelType: label,
+      status: "serving",
+      ...(separate ? { lane: { $in: [0, null] } } : {}),
+    })
+      .select("_id fuelType quantity serviceDurationSeconds fuelingStartTime resource lane")
+      .lean(),
+  ]);
+  const byResource = new Map();
+  for (const b of bookings) byResource.set(Number(b.resource) || 1, b);
+  for (const w of walkIns) {
+    if (separate || !(w.lane >= 1)) byResource.set(Number(w.resource) || 1, { ...w, kind: "walkin" });
+  }
+  return { resources, byResource };
+}
+
+/** The lowest-numbered free app nozzle for this fuel, or null when all are in use. */
+async function freeAppNozzle(stationId, fuelType) {
+  const { resources, byResource } = await appNozzleUse(stationId, fuelType);
+  for (let r = 1; r <= resources; r++) if (!byResource.has(r)) return r;
+  return null;
+}
+
+/**
+ * null when an app nozzle for this fuel is free; otherwise the vehicle whose
+ * fill ends first (when the next nozzle frees).
+ */
+async function servingAt(stationId, fuelType) {
+  const { resources, byResource } = await appNozzleUse(stationId, fuelType);
+  if (byResource.size < resources) return null;
+  let first = null;
+  for (const v of byResource.values()) {
+    if (!first || (releaseAt(v)?.getTime() ?? Infinity) < (releaseAt(first)?.getTime() ?? Infinity)) first = v;
+  }
+  return first;
 }
 
 /**
@@ -65,7 +122,7 @@ async function servingAt(stationId, fuelType) {
  * upcoming or its fuel's nozzle already has a car serving (the unique index
  * turns that race into a refusal, via bookingTransitions).
  */
-async function startService(bookingId, { now = new Date(), set = {} } = {}) {
+async function startService(bookingId, { now = new Date(), set = {}, resource = null } = {}) {
   const current = await Booking.findOne({ _id: bookingId, status: "upcoming" })
     .select("fuelType quantity serviceDurationSeconds arrivalTime")
     .lean();
@@ -79,6 +136,8 @@ async function startService(bookingId, { now = new Date(), set = {} } = {}) {
       ...set,
       fuelingStartTime: now,
       serviceDurationSeconds: serviceSecondsOf(current),
+      // The nozzle it is actually served at (any free app nozzle of its fuel).
+      ...(resource ? { resource } : {}),
     },
   });
 }
@@ -108,12 +167,14 @@ async function checkIn({ bookingId, filter = {}, set = {}, now = new Date() }) {
       guard.assertHeld();
 
       if (!busy) {
+        const resource = await freeAppNozzle(booking.station, booking.fuelType);
         // Fueling starts when the nozzle is actually taken -- inside the lock,
         // which may have waited for a car ahead to finish -- not when the scan
         // arrived (that is recorded as arrivalTime).
         const startedAt = new Date(Math.max(now.getTime(), Date.now()));
         const started = await startService(bookingId, {
           now: startedAt,
+          resource,
           set: { ...(booking.arrivalTime ? {} : set), arrivalTime: booking.arrivalTime || now },
         });
         if (started) {
@@ -146,60 +207,83 @@ async function checkIn({ bookingId, filter = {}, set = {}, now = new Date() }) {
 }
 
 /**
- * One fuel's nozzle at this station has been released: start the vehicle
- * that arrived first today -- a checked-in booking or a walk-in. null when a
- * vehicle is still serving or nobody is waiting.
+ * App nozzles of one fuel at this station have been released: start the
+ * vehicles that arrived first today -- checked-in bookings or walk-ins sharing
+ * the app nozzles -- one per free nozzle. [] when none is free or nobody waits.
  *
- * Without `fuelType`, every fuel's nozzle is advanced; the first vehicle
- * started is returned (advanceAllNozzles returns them all).
- *
- * @returns {Promise<object|null>} the started booking document, or the started
- *   walk-in (a plain object with kind "walkin")
+ * @returns {Promise<object[]>} started booking documents and walk-ins (kind "walkin")
  */
-async function advanceNozzle(stationId, { now = new Date(), fuelType = null } = {}) {
-  if (!fuelType) return (await advanceAllNozzles(stationId, { now }))[0] || null;
-
+async function advanceAppNozzles(stationId, { now = new Date(), fuelType }) {
   const label = fuelLabel(fuelType);
   const started = await lock.withLock(
     nozzleKey(stationId, fuelType),
     async (guard) => {
-      if (await servingAt(stationId, fuelType)) return null;
+      const out = [];
       const today = dateKey(now);
-      const [nextBooking, nextWalkIn] = await Promise.all([
-        Booking.findOne({ station: stationId, fuelType: label, status: "upcoming", bookingDate: today, arrivalTime: { $ne: null } })
-          .sort({ arrivalTime: 1, _id: 1 })
-          .select("_id arrivalTime")
-          .lean(),
-        WalkIn.findOne({ station: stationId, fuelType: label, status: "waiting", businessDate: today })
-          .sort({ arrivalTime: 1, _id: 1 })
-          .select("_id arrivalTime")
-          .lean(),
-      ]);
-      if (!nextBooking && !nextWalkIn) return null;
-      guard.assertHeld();
-      // Started when the nozzle is taken, never before the release that freed it.
-      const startedAt = new Date(Math.max(now.getTime(), Date.now()));
+      // Walk-ins with their own nozzles never take an app nozzle.
+      const { separate } = await laneSetup(stationId, fuelType);
+      for (;;) {
+        // eslint-disable-next-line no-await-in-loop -- one nozzle at a time, in order
+        const resource = await freeAppNozzle(stationId, fuelType);
+        if (!resource) break;
+        // eslint-disable-next-line no-await-in-loop
+        const [nextBooking, nextWalkIn] = await Promise.all([
+          Booking.findOne({ station: stationId, fuelType: label, status: "upcoming", bookingDate: today, arrivalTime: { $ne: null } })
+            .sort({ arrivalTime: 1, _id: 1 })
+            .select("_id arrivalTime")
+            .lean(),
+          separate
+            ? null
+            : WalkIn.findOne({ station: stationId, fuelType: label, status: "waiting", businessDate: today })
+                .sort({ arrivalTime: 1, _id: 1 })
+                .select("_id arrivalTime")
+                .lean(),
+        ]);
+        if (!nextBooking && !nextWalkIn) break;
+        guard.assertHeld();
+        // Started when the nozzle is taken, never before the release that freed it.
+        const startedAt = new Date(Math.max(now.getTime(), Date.now()));
 
-      const walkInFirst =
-        nextWalkIn && (!nextBooking || new Date(nextWalkIn.arrivalTime) < new Date(nextBooking.arrivalTime));
-      if (!walkInFirst) return startService(nextBooking._id, { now: startedAt });
-
-      const walkIn = await WalkIn.findOneAndUpdate(
-        { _id: nextWalkIn._id, status: "waiting" },
-        { $set: { status: "serving", fuelingStartTime: startedAt } },
-        { returnDocument: "after" },
-      ).lean();
-      return walkIn ? { ...walkIn, kind: "walkin" } : null;
+        const walkInFirst =
+          nextWalkIn && (!nextBooking || new Date(nextWalkIn.arrivalTime) < new Date(nextBooking.arrivalTime));
+        let s;
+        if (!walkInFirst) {
+          // eslint-disable-next-line no-await-in-loop
+          s = await startService(nextBooking._id, { now: startedAt, resource });
+        } else {
+          // eslint-disable-next-line no-await-in-loop
+          const w = await WalkIn.findOneAndUpdate(
+            { _id: nextWalkIn._id, status: "waiting" },
+            { $set: { status: "serving", fuelingStartTime: startedAt, lane: 0, resource } },
+            { returnDocument: "after" },
+          ).lean();
+          s = w ? { ...w, kind: "walkin" } : null;
+        }
+        if (!s) break; // raced by another server: it will hand the nozzle over
+        out.push(s);
+      }
+      return out;
     },
     LOCK_OPTS,
   );
-  if (started) {
-    metrics.inc(started.kind === "walkin" ? "walkin_started_count" : "nozzle_auto_start_count");
+  if (started.length) {
     const timer = require("./serviceTimer");
-    if (started.kind === "walkin") timer.scheduleWalkInCompletion(started);
-    else timer.scheduleCompletion(started);
+    for (const s of started) {
+      metrics.inc(s.kind === "walkin" ? "walkin_started_count" : "nozzle_auto_start_count");
+      if (s.kind === "walkin") timer.scheduleWalkInCompletion(s);
+      else timer.scheduleCompletion(s);
+    }
   }
   return started;
+}
+
+/**
+ * One fuel's app nozzles at this station: start what can start; the first
+ * vehicle started, or null. Without `fuelType`, every fuel.
+ */
+async function advanceNozzle(stationId, { now = new Date(), fuelType = null } = {}) {
+  if (!fuelType) return (await advanceAllNozzles(stationId, { now }))[0] || null;
+  return (await advanceAppNozzles(stationId, { now, fuelType }))[0] || null;
 }
 
 /** Advance every fuel's nozzle at a station; each started vehicle, in fuel order. */
@@ -207,8 +291,59 @@ async function advanceAllNozzles(stationId, { now = new Date() } = {}) {
   const started = [];
   for (const fuel of FUEL_KEYS) {
     // eslint-disable-next-line no-await-in-loop -- one lock per fuel, taken in a fixed order
-    const s = await advanceNozzle(stationId, { now, fuelType: fuel });
-    if (s) started.push(s);
+    started.push(...(await advanceAppNozzles(stationId, { now, fuelType: fuel })));
+    // eslint-disable-next-line no-await-in-loop
+    started.push(...(await advanceWalkInLanes(stationId, { now, fuelType: fuel })));
+  }
+  return started;
+}
+
+/**
+ * Walk-ins at a fuel's own walk-in nozzles (config/nozzleModes.js): start the
+ * earliest waiting walk-ins on every free nozzle, several at once. Nothing
+ * when walk-ins share the app nozzle (advanceNozzle handles them there).
+ * @returns {Promise<object[]>} the walk-ins started (kind "walkin")
+ */
+async function advanceWalkInLanes(stationId, { now = new Date(), fuelType } = {}) {
+  const { separate, lanes } = await laneSetup(stationId, fuelType);
+  if (!separate) return [];
+  await WalkIn.ensureLaneIndexes();
+  const label = fuelLabel(fuelType);
+  const started = await lock.withLock(
+    walkInLanesKey(stationId, fuelType),
+    async (guard) => {
+      const busy = await WalkIn.find({ station: stationId, fuelType: label, status: "serving", lane: { $gte: 1 } })
+        .select("lane")
+        .lean();
+      const taken = new Set(busy.map((w) => w.lane));
+      const free = [];
+      for (let lane = 1; lane <= lanes; lane++) if (!taken.has(lane)) free.push(lane);
+      if (!free.length) return [];
+      const waiting = await WalkIn.find({ station: stationId, fuelType: label, status: "waiting", businessDate: dateKey(now) })
+        .sort({ arrivalTime: 1, _id: 1 })
+        .limit(free.length)
+        .select("_id")
+        .lean();
+      guard.assertHeld();
+      const startedAt = new Date(Math.max(now.getTime(), Date.now()));
+      const out = [];
+      for (let i = 0; i < waiting.length; i++) {
+        // eslint-disable-next-line no-await-in-loop -- one nozzle each, in arrival order
+        const w = await WalkIn.findOneAndUpdate(
+          { _id: waiting[i]._id, status: "waiting" },
+          { $set: { status: "serving", fuelingStartTime: startedAt, lane: free[i] } },
+          { returnDocument: "after" },
+        ).lean();
+        if (w) out.push({ ...w, kind: "walkin" });
+      }
+      return out;
+    },
+    LOCK_OPTS,
+  );
+  if (started.length) {
+    metrics.inc("walkin_started_count", started.length);
+    const timer = require("./serviceTimer");
+    started.forEach((w) => timer.scheduleWalkInCompletion(w));
   }
   return started;
 }
@@ -216,7 +351,12 @@ async function advanceAllNozzles(stationId, { now = new Date() } = {}) {
 module.exports = {
   checkIn,
   advanceNozzle,
+  advanceAppNozzles,
+  appNozzleUse,
+  freeAppNozzle,
   advanceAllNozzles,
+  advanceWalkInLanes,
+  laneSetup,
   startService,
   releaseAt,
   serviceSecondsOf,

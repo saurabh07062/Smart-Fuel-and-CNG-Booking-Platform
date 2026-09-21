@@ -222,7 +222,7 @@ test("nozzleScheduler + bookingController: single-nozzle overlap enforcement", a
   if (!available) {
     await t.test("HTTP race (skipped)", (t2) => t2.skip(`API not reachable at ${API} — start the stack to run this part`));
   } else {
-    await t.test("bookingController.createBooking: only one of many concurrent requests wins the nozzle", async () => {
+    await t.test("bookingController.createBooking: concurrent requests each get their own position, never overlapping", async () => {
       const CONCURRENCY = 15;
       const raceDate = "2099-03-01";
       const raceSlot = "11:00 AM";
@@ -296,12 +296,19 @@ test("nozzleScheduler + bookingController: single-nozzle overlap enforcement", a
           `    net errors: ${networkErrors.length}\n`,
       );
 
+      // Every stored booking's time on the nozzle, before cleaning up.
+      const spans = (await Booking.find({ station: station._id, bookingDate: raceDate, timeSlot: raceSlot, status: "upcoming" }).lean())
+        .map((b) => [new Date(b.bookingStartTime).getTime(), new Date(b.bookingEndTime).getTime(), b.resource])
+        .sort((a, b) => a[0] - b[0]);
       // Clean up this sub-test's bookings before asserting.
       await Booking.deleteMany({ station: station._id, bookingDate: raceDate, timeSlot: raceSlot });
 
       assert.equal(networkErrors.length, 0, "no request should fail at the network level");
-      assert.equal(persistedConfirmed, 1, `exactly one booking must persist as confirmed for the single nozzle, found ${persistedConfirmed}`);
-      assert.equal(succeeded.length, 1, "exactly one client should receive a 200");
+      // A Petrol window holds floor(1800 / 40) = 45 fills on its one nozzle:
+      // all 15 fit, each at its own position.
+      assert.equal(persistedConfirmed, succeeded.length, "every confirmed booking is stored, nothing else");
+      assert.ok(succeeded.length >= 1 && succeeded.length <= 45, `${succeeded.length} confirmed`);
+      for (let i = 1; i < spans.length; i++) assert.ok(spans[i][0] >= spans[i - 1][1], "no two overlap on the single nozzle");
       assert.equal(succeeded.length + conflicted.length, tokens.length, "every request must get a definite answer");
     });
   }

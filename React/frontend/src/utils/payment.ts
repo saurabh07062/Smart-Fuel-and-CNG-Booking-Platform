@@ -11,6 +11,10 @@ interface PaymentFields {
   status?: string;
   paymentStatus?: string;
   payMethod?: string;
+  /** How a pay-at-the-pump payment was collected. */
+  collectionMethod?: "cash" | "upi" | null;
+  /** Set when the car checked in at the pump. */
+  arrivalTime?: string | null;
 }
 
 const ENDED_WITHOUT_SERVICE = ["cancelled", "expired", "no_show"];
@@ -18,7 +22,10 @@ const ENDED_WITHOUT_SERVICE = ["cancelled", "expired", "no_show"];
 export function paymentState(b: PaymentFields): { label: string; tone: PaymentTone } {
   switch (b.paymentStatus) {
     case "paid":
-      return { label: b.payMethod === "online" ? "Paid online" : "Paid at pump", tone: "good" };
+      if (b.payMethod === "online") return { label: "Paid online", tone: "good" };
+      if (b.collectionMethod === "cash") return { label: "Paid at pump · Cash", tone: "good" };
+      if (b.collectionMethod === "upi") return { label: "Paid at pump · UPI", tone: "good" };
+      return { label: "Paid at pump", tone: "good" };
     case "refunded":
       return { label: "Refunded", tone: "muted" };
     case "failed":
@@ -32,9 +39,11 @@ export function paymentState(b: PaymentFields): { label: string; tone: PaymentTo
   return { label: "—", tone: "muted" };
 }
 
-/** The payment is owed at the pump and can be collected now (being fuelled or finished). */
+/** The payment is owed at the pump and can be collected now: the car is at the pump (checked in), being fuelled, or done. */
 export function canCollectAtPump(b: PaymentFields): boolean {
-  return b.payMethod === "station" && b.paymentStatus === "due_at_station" && ["serving", "completed"].includes(String(b.status));
+  if (b.payMethod !== "station" || b.paymentStatus !== "due_at_station") return false;
+  if (["serving", "completed"].includes(String(b.status))) return true;
+  return b.status === "upcoming" && !!b.arrivalTime;
 }
 
 /** A short, stable reference for a booking: its order id, else the end of its database id. */

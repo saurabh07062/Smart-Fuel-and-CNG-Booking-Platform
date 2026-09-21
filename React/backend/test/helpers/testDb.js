@@ -19,6 +19,15 @@
  * This file lives outside test/ so `node --test test/` does not run it.
  */
 
+// No live road routing in tests (services/station/roadDistance.js): distances
+// stay the deterministic straight line, and no test needs the internet.
+process.env.ROUTING_URL = process.env.TEST_ROUTING_URL || "off";
+// The demo's fixed station distances (data/fixedDistances.json) never apply in tests.
+process.env.FIXED_DISTANCES = "off";
+// Fixtures book far-off dates (2099) so they never meet real bookings; the
+// advance-booking limit itself is tested with its real value (advanceBooking.test.js).
+process.env.ADVANCE_BOOKING_DAYS = process.env.TEST_ADVANCE_BOOKING_DAYS || "40000";
+
 const DEFAULT_URI = "mongodb://127.0.0.1:27017/fuelmart_test";
 const DEFAULT_API = "http://127.0.0.1:5055";
 

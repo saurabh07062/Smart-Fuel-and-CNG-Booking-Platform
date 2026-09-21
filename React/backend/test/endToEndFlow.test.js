@@ -105,6 +105,7 @@ test("real flow: vendor -> station -> customer -> check-in -> completion", { tim
         businessName: `${tag} Fuels`,
         phone: "9000000000",
         vendorAddress: "E2E Road, Pune",
+        products: "petrol,diesel,cng",
       });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.user.vendorStatus, "pending");
@@ -194,7 +195,7 @@ test("real flow: vendor -> station -> customer -> check-in -> completion", { tim
       return;
     }
 
-    await t.test("the customer books; stock is reserved; the same slot cannot be booked twice", async () => {
+    await t.test("the customer books; stock is reserved; the next customer gets the next position, never the same one", async () => {
       const body = { stationId, fuelType: "Petrol", quantity: 10, bookingDate: dateKey(), timeSlot: slot, payMethod: "station" };
       const r = await call("POST", "/api/bookings", tokenFor(customer._id), body);
       assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -206,9 +207,14 @@ test("real flow: vendor -> station -> customer -> check-in -> completion", { tim
       const s = await Station.findById(stationId).lean();
       assert.equal(s.inventoryCommitted.petrol, 10);
 
-      const clash = await call("POST", "/api/bookings", tokenFor(otherCustomer._id), body);
-      assert.equal(clash.status, 400, JSON.stringify(clash.body));
-      assert.equal(clash.body.reason, "SLOT_FULL");
+      // The window holds 45 Petrol fills: a second customer is placed back to
+      // back on the nozzle, starting when the first one's fill ends.
+      const second = await call("POST", "/api/bookings", tokenFor(otherCustomer._id), body);
+      assert.equal(second.status, 200, JSON.stringify(second.body));
+      assert.equal(new Date(second.body.booking.bookingStartTime).getTime(), new Date(booking.bookingEndTime).getTime());
+      // Taken back out, so the rest of the flow follows one customer.
+      const out = await call("PATCH", `/api/bookings/${second.body.booking._id}/cancel`, tokenFor(otherCustomer._id));
+      assert.equal(out.status, 200, JSON.stringify(out.body));
     });
 
     await t.test("customers see only their own bookings; only the owning vendor can check in", async () => {

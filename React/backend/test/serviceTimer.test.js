@@ -141,6 +141,8 @@ test("service timers against MongoDB", async (t) => {
       );
 
       await waitFor(async () => (await reload(b)).status === "completed", 3000, "second fill");
+      // The status flips first; the stock movement is the next write (bookingCompletion.js).
+      await waitFor(async () => (await sales(s)) >= 2, 5000, "both sales recorded").catch(() => {});
       assert.equal(await sales(s), 2, "each car's fuel deducted once");
       assert.equal(await Booking.countDocuments({ station: s._id, status: "serving" }), 0, "nozzle released at the end");
       assert.equal(await Notification.countDocuments({ booking: { $in: [a._id, b._id] }, type: "booking_completed" }), 2);

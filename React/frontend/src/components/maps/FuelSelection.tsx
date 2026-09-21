@@ -20,13 +20,15 @@ import { toApiError } from "@/services/api/apiClient";
 export default function FuelSelection() {
   const navigate = useNavigate();
   const coords = useLocationStore((s) => s.coords);
+  const located = useLocationStore((s) => s.located);
   const fuelType = useLocationStore((s) => s.fuelType);
   const searching = useLocationStore((s) => s.searching);
   const setFuelType = useLocationStore((s) => s.setFuelType);
   const setSearching = useLocationStore((s) => s.setSearching);
   const setResult = useLocationStore((s) => s.setResult);
 
-  if (!coords) return null;
+  // Asked only after the user sets their location on this visit.
+  if (!coords || !located) return null;
 
   const search = async (fuel: "PETROL" | "CNG") => {
     // Guards a double-click firing two searches (and so two navigations)

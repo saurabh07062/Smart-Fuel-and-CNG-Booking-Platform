@@ -1,5 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useResync, useSocketEvent } from "@/hooks/useSocket";
+import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
+import { coalesce } from "@/utils/coalesce";
 import ConsoleShell, { type ConsoleTab } from "@/components/console/ConsoleShell";
 import { ConsoleEmpty, ConsoleLoading, ConsoleStat } from "@/components/console/ConsoleBits";
 import { useSuperAdminStore, type SaTab } from "@/store/superAdminStore";
@@ -200,6 +203,20 @@ export default function SuperAdmin() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Live: totals, revenue and vendor counts change with bookings, stations and
+  // vendor accounts. Silent and coalesced, so a burst costs at most two requests.
+  const refreshLive = useMemo(() => coalesce(() => useSuperAdminStore.getState().refreshLive()), []);
+  useSocketEvent(SOCKET_EVENTS.BOOKING_CREATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.BOOKING_UPDATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.BOOKING_CANCELLED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.BOOKING_COMPLETED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.STATION_CREATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.STATION_UPDATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.STATION_DELETED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.VENDOR_REQUEST_CREATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.VENDOR_STATUS_CHANGED, refreshLive);
+  useResync(refreshLive);
 
   const body = () => {
     if (error) {

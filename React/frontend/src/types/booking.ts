@@ -20,6 +20,8 @@ export interface Booking {
   timeSlot?: string;
   status: BookingStatus;
   paymentStatus?: string;
+  /** How a pay-at-the-pump payment was collected: cash, or UPI scanned at the pump. */
+  collectionMethod?: "cash" | "upi" | null;
   payMethod?: string;
   vehiclePlate?: string;
   /** Snapshot of the vehicle at booking time. Null on older bookings. */
@@ -61,6 +63,11 @@ export interface SlotAvailability {
   /** Can be booked: not passed, open, nozzle free. */
   bookable?: boolean;
   reason?: "PASSED" | "CLOSED" | "RESERVED" | null;
+  /**
+   * The window's capacity for this fuel (backend services/queue/slotAllocator.js):
+   * total = nozzles x services that fit in 30 minutes; available = still free.
+   */
+  capacity?: { total: number; available: number; reserved: number; resources: number };
 }
 
 export interface AvailabilityResponse {

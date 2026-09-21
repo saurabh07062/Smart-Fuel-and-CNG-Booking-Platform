@@ -120,10 +120,13 @@ async function promoteWithinLock(stationId, fuelType, now) {
   const promoted = [];
   for (const w of waiting) {
     if (isSlotElapsed(w.bookingDate, w.timeSlot, now)) continue;
-    if (!w.bookingStartTime || !w.bookingEndTime) continue;
-    if (await nozzleScheduler.hasOverlap(w.station, w.bookingStartTime, w.bookingEndTime, undefined, { fuelType: w.fuelType })) {
-      continue;
-    }
+    // The earliest free position left in its window (a cancellation or a
+    // finished fill frees one), on any of the fuel's app nozzles.
+    const position = await nozzleScheduler.allocateInWindow(w.station, w.fuelType, w.bookingDate, w.timeSlot, {
+      quantity: w.quantity,
+      now,
+    });
+    if (!position) continue;
 
     const fuel = normaliseFuel(w.fuelType);
     // A promoted booking takes stock like a new one does, or is not promoted.
@@ -135,7 +138,14 @@ async function promoteWithinLock(stationId, fuelType, now) {
       bookingId: w._id,
       to: "upcoming",
       from: ["waitlisted"],
-      set: { verificationCode: generateCode(), waitlistPriority: null, stockReserved: true },
+      set: {
+        verificationCode: generateCode(),
+        waitlistPriority: null,
+        stockReserved: true,
+        bookingStartTime: position.start,
+        bookingEndTime: position.end,
+        resource: position.resource,
+      },
     });
     if (!booking) {
       await stockLedger.unreserveStock(w.station, fuel, w.quantity);

@@ -19,7 +19,8 @@ import {
 } from "@/store/vendorMgmtStore";
 import { pushToast } from "@/store/toastStore";
 import { toApiError } from "@/services/api/apiClient";
-import { useSocketEvent } from "@/hooks/useSocket";
+import { useResync, useSocketEvent } from "@/hooks/useSocket";
+import { coalesce } from "@/utils/coalesce";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { formatDate, formatINR, formatINRShort, initial } from "@/utils/consoleFormat";
 
@@ -82,8 +83,15 @@ export default function VendorManagement() {
     void load();
   }, [load]);
 
-  useSocketEvent(SOCKET_EVENTS.VENDOR_STATUS_CHANGED, () => void load(), [load]);
-  useSocketEvent(SOCKET_EVENTS.VENDOR_APPROVED, () => void load(), [load]);
+  // Live, silently (no loading screen) and coalesced: new applications, every
+  // status change, and stations that affect the counts.
+  const refreshLive = useMemo(() => coalesce(() => useVendorMgmtStore.getState().refreshLive()), []);
+  useSocketEvent(SOCKET_EVENTS.VENDOR_REQUEST_CREATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.VENDOR_STATUS_CHANGED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.VENDOR_APPROVED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.STATION_CREATED, refreshLive);
+  useSocketEvent(SOCKET_EVENTS.STATION_DELETED, refreshLive);
+  useResync(refreshLive);
 
   /** Runs an action, reports its message, and refreshes the list. */
   const run = async (fn: () => Promise<{ msg?: string }>, fallback: string) => {

@@ -13,7 +13,10 @@ import { fileURLToPath, URL } from "node:url";
 // through without touching real data.
 const API_TARGET = process.env.FUELMART_API_TARGET || "http://localhost:5000";
 
-export default defineConfig({
+// `--mode customer` (npm run build:customer): the customer app, served by the
+// backend at /app (backend src/app.js) and opened by the Android app (React/mobile).
+export default defineConfig(({ mode }) => ({
+  base: mode === "customer" ? "/app/" : "/",
   plugins: [react()],
   resolve: {
     // The "@/..." alias must be declared HERE as well as in tsconfig.json.
@@ -33,5 +36,7 @@ export default defineConfig({
       "/socket.io": { target: API_TARGET, ws: true, changeOrigin: true },
     },
   },
-  build: { outDir: "dist", sourcemap: true },
-});
+  // "hidden": maps are written for debugging but not referenced by the served
+  // files, so the original source is not published with the app.
+  build: { outDir: mode === "customer" ? "dist-customer" : "dist", sourcemap: "hidden" },
+}));

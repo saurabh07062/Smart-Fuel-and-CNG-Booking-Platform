@@ -38,6 +38,7 @@ test("waitlist against MongoDB", async (t) => {
   const User = require("../src/models/User");
   const Station = require("../src/models/Station");
   const Booking = require("../src/models/Booking");
+  const nozzleScheduler = require("../src/services/queue/nozzleScheduler");
   const BookingAttempt = require("../src/models/BookingAttempt");
   const Notification = require("../src/models/Notification");
   const SecurityEvent = require("../src/models/SecurityEvent");
@@ -94,6 +95,36 @@ test("waitlist against MongoDB", async (t) => {
       body: { stationId: String(station._id), fuelType: "Petrol", quantity: 10, bookingDate: DATE, timeSlot, payMethod: "station", ...extra },
     });
   const reload = (b) => Booking.findById(b._id).lean();
+  /**
+   * A 30-minute window holds 45 Petrol fills of 40 s back to back on the one
+   * app nozzle (services/queue/slotAllocator.js). Fill all but the first
+   * position with other customers' bookings, so one more booking fills the
+   * window and the next is "full" -- the situation the waitlist is for.
+   */
+  const { SLOT_SPACING_SECONDS } = require("../src/config/booking");
+  const fillWindowButOne = async (timeSlot) => {
+    const start = nozzleScheduler.parseStartDateTime(DATE, timeSlot).getTime();
+    const fills = Math.floor(SLOT_SPACING_SECONDS / 40);
+    const rows = [];
+    for (let k = 1; k < fills; k++) {
+      rows.push({
+        user: new mongoose.Types.ObjectId(),
+        station: station._id,
+        fuelType: "Petrol",
+        quantity: 10,
+        price: 100,
+        amount: 1000,
+        bookingDate: DATE,
+        timeSlot,
+        status: "upcoming",
+        resource: 1,
+        bookingStartTime: new Date(start + k * 40_000),
+        bookingEndTime: new Date(start + (k + 1) * 40_000),
+        serviceDurationSeconds: 40,
+      });
+    }
+    await Booking.insertMany(rows);
+  };
   const committed = async () => (await Station.findById(station._id).lean()).inventoryCommitted?.petrol || 0;
   const res = () => ({
     statusCode: 200,
@@ -110,6 +141,9 @@ test("waitlist against MongoDB", async (t) => {
     let e;
 
     await t.test("a full slot is refused without joinWaitlist, and a waitlist request must pay at the station", async () => {
+      await fillWindowButOne("10:00 AM");
+      await fillWindowButOne("10:30 AM");
+      await fillWindowButOne("11:00 AM");
       a = await book(A, "10:00 AM");
       assert.equal(a.status, "upcoming");
       await assert.rejects(book(B, "10:00 AM"), { reason: "SLOT_FULL" });

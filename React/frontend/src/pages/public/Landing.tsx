@@ -20,7 +20,7 @@ const FEATURES: Array<[string, string, string, string]> = [
   ["fa-location-crosshairs", "Find Stations", "Real-time geolocation detection shows all nearby petrol pumps and CNG stations with live queue status.", "#2563EB"],
   ["fa-calendar-check", "Book Slots", "Reserve your time slot, choose fuel type and quantity. No more waiting in long queues at the pump.", "#10B981"],
   ["fa-qrcode", "QR Pass", "Get a digital QR booking pass. Scan at the station for instant verification and fueling.", "#F97316"],
-  ["fa-wallet", "Digital Payments", "Pay via wallet, UPI, or cards. Track every transaction with detailed payment history.", "#8B5CF6"],
+  ["fa-wallet", "Pay at the Pump", "No online payment needed. Pay the attendant when you fuel, and get an invoice for every fill.", "#8B5CF6"],
   ["fa-bell", "Smart Alerts", "Get notified about slot reminders, queue updates, price changes, and exclusive offers.", "#EC4899"],
   ["fa-shield-halved", "Secure & Fast", "JWT authentication, encrypted data, and OTP verification keep your account safe.", "#06B6D4"],
 ];
@@ -28,7 +28,7 @@ const FEATURES: Array<[string, string, string, string]> = [
 const STEPS: Array<[string, string, string]> = [
   ["fa-search", "Find Station", "Locate nearby stations on the map with live data."],
   ["fa-hand-pointer", "Select & Book", "Choose fuel type, slot, and quantity."],
-  ["fa-credit-card", "Pay Digitally", "Complete payment via wallet or UPI."],
+  ["fa-money-bill-wave", "Pay at the Pump", "Pay the attendant when you arrive and fuel."],
   ["fa-qrcode", "Scan QR & Fuel", "Show QR pass at the station and fuel up."],
 ];
 
@@ -107,7 +107,7 @@ export default function Landing() {
               <span style={{ color: "var(--primary)" }}>Book Fuel</span> Instantly.
             </h1>
             <p className="text-lg mb-8 max-w-md" style={{ color: "var(--muted)", animation: "slideUp .7s ease both" }}>
-              Find nearby stations, book your fuel slot, pay digitally, and arrive to a zero-wait experience. Smart fueling for modern India.
+              Find nearby stations, book your fuel slot, pay at the pump, and arrive to a zero-wait experience. Smart fueling for modern India.
             </p>
             <div className="flex flex-wrap gap-4" style={{ animation: "slideUp .8s ease both" }}>
               <button onClick={() => navigate("/register")} className="btn btn-primary btn-lg">

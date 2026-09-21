@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import { refreshSession } from "@/services/api/apiClient";
+import { tabId } from "@/utils/tabId";
 
 /**
  * One Socket.IO connection for the whole application.
@@ -62,6 +63,8 @@ export function getSocket(): Socket {
     // production the app is served from the backend's origin. The browser
     // sends the httpOnly session cookie with the handshake by itself.
     withCredentials: true,
+    // This tab's own session cookie is used when it has one (utils/tabId.ts).
+    auth: { tab: tabId() },
     reconnection: true,
     reconnectionDelay: 500,
     reconnectionDelayMax: 5000,

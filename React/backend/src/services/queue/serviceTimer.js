@@ -140,7 +140,10 @@ async function releaseNozzle(stationId, { now = new Date(), refresh = true, fuel
   let started = [];
   try {
     started = fuelType
-      ? [await nozzleService.advanceNozzle(stationId, { now, fuelType })].filter(Boolean) // arms its own timer
+      ? [
+          ...(await nozzleService.advanceAppNozzles(stationId, { now, fuelType })), // arm their own timers
+          ...(await nozzleService.advanceWalkInLanes(stationId, { now, fuelType })),
+        ].filter(Boolean)
       : await nozzleService.advanceAllNozzles(stationId, { now });
   } catch (err) {
     metrics.inc("nozzle_advance_error_count");

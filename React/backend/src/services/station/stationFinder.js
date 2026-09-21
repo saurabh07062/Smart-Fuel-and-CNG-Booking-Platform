@@ -51,14 +51,21 @@ const round2 = (n) => Math.round(n * 100) / 100;
 function toSlotInfo(slot) {
   if (!slot?.start) return null;
   const open = slot.bookable ?? slot.available;
-  const windowEnd = new Date(slot.start.getTime() + SLOT_SPACING_SECONDS * 1000);
+  // The window the label names, and the capacity the scheduler worked out for
+  // it (services/queue/nozzleScheduler.js): nozzles x services that fit, less
+  // what is taken.
+  const windowEnd = slot.windowEnd || new Date(slot.start.getTime() + SLOT_SPACING_SECONDS * 1000);
+  const windowStart = new Date(windowEnd.getTime() - SLOT_SPACING_SECONDS * 1000);
+  const cap = slot.capacity || { total: 0, available: 0, reserved: 0 };
   return {
     slot: slot.label,
-    start: formatHHMM(slot.start),
+    start: formatHHMM(windowStart),
     end: formatHHMM(windowEnd),
-    capacity: nozzleScheduler.APP_NOZZLES,
-    booked: open ? 0 : 1,
-    available: open ? 1 : 0,
+    // When a booking made now would start in this window.
+    estimatedStart: open ? formatHHMM(slot.start) : null,
+    capacity: cap.total,
+    booked: cap.reserved,
+    available: open ? cap.available : 0,
     status: open ? "AVAILABLE" : slot.reason === "CLOSED" ? "CLOSED" : "FULL",
   };
 }
@@ -127,7 +134,9 @@ function describeStation(plain, { fuelKey, quantity, now, today, windows, queue 
   const free = slots.filter((s) => s.bookable);
 
   let unavailable = null;
+  const nozzleModes = require("../../config/nozzleModes");
   if (plain.status !== "Active") unavailable = ["INACTIVE", "Station is not active"];
+  else if (!nozzleModes.acceptsOnline(plain, fuelKey)) unavailable = ["WALK_IN_ONLY", "Walk-in only (no app booking)"];
   else if (price === null) unavailable = ["NO_PRICE", `No ${label} price published`];
   else if (!(stock > 0)) unavailable = ["OUT_OF_STOCK", `No ${label} left to book`];
   else if (quantity !== null && stock < quantity) {
@@ -145,6 +154,12 @@ function describeStation(plain, { fuelKey, quantity, now, today, windows, queue 
     latitude: position?.lat ?? null,
     longitude: position?.lng ?? null,
     distance: round2(plain.distanceKm),
+    // "road" = driving distance along the roads (services/station/roadDistance.js),
+    // "straight" = straight line, when no route was available.
+    distanceType: plain.distanceType || "straight",
+    distanceSource: plain.distanceSource || null,
+    straightLineKm: Number.isFinite(plain.straightLineKm) ? round2(plain.straightLineKm) : round2(plain.distanceKm),
+    driveTimeMinutes: Number.isFinite(plain.driveTimeMinutes) ? Math.round(plain.driveTimeMinutes) : null,
     fuelType: fuelKey.toUpperCase(),
     fuelTypes: plain.fuelTypes || [],
     // Only for fuels the station actually sells.

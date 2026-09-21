@@ -9,6 +9,8 @@ import { useStationStore } from "@/store/stationStore";
 import { useWatchStation } from "@/hooks/useSocket";
 import { fetchStationById } from "@/services/api/stationApi";
 import { queueLevelOf } from "@/utils/format";
+import { directionsUrl } from "@/utils/navigation";
+import { distanceNote } from "@/utils/distanceNote";
 
 const AMENITY_ICONS: Record<string, string> = {
   ATM: "credit-card",
@@ -45,20 +47,30 @@ export default function StationDetail() {
 
   useWatchStation(id);
 
+  // Always ask the server when the page opens -- even when the station is
+  // already in the list store, which may have been loaded earlier. The result
+  // goes INTO the store, so this page, the list and the dashboard all show the
+  // same, current station, and later socket events keep patching it.
   useEffect(() => {
-    if (fromStore) return;
     let cancelled = false;
+    setError(null);
     fetchStationById(id)
-      .then((s) => {
-        if (!cancelled) setFetched(s);
+      .then((fresh) => {
+        if (cancelled || !fresh) return;
+        const store = useStationStore.getState();
+        if (store.stations.some((x) => x.id === fresh.id)) store.patchStation(fresh);
+        else if (!store.addStation(fresh as unknown as Parameters<typeof store.addStation>[0])) setFetched(fresh);
       })
       .catch(() => {
-        if (!cancelled) setError("Could not load this station.");
+        // A station already on screen stays; only a page with nothing to show errors.
+        if (!cancelled && !useStationStore.getState().stations.some((x) => x.id === id)) {
+          setError("Could not load this station.");
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [id, fromStore]);
+  }, [id]);
 
   const s = fromStore ?? fetched;
 
@@ -82,10 +94,7 @@ export default function StationDetail() {
   const level = queueLevelOf(s.queueStatus);
   const queueText = level === "high" ? "High" : level === "medium" ? "Moderate" : "Low";
   const token = level === "low" ? "good" : level === "medium" ? "warn" : "bad";
-  const hasCoords = s.lat != null && s.lng != null;
-  const directions = hasCoords
-    ? `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`
-    : null;
+  const directions = directionsUrl(s.lat, s.lng);
   const book = (fuel?: string) =>
     navigate(`/booking?stationId=${s.id}${fuel ? `&fuelType=${encodeURIComponent(fuel)}` : ""}`);
   const amenities = s.amenities ?? [];
@@ -102,10 +111,10 @@ export default function StationDetail() {
           style={s.image ? { backgroundImage: `url('${s.image}')` } : undefined}
         />
         <div className="cx-panel-body flex flex-wrap items-end justify-between gap-4">
-          <div className="flex items-start gap-4 min-w-0">
+          <div className="flex items-center gap-4 min-w-0">
             <div
               className={`cx-thumb ${s.open ? "" : "is-closed"}`}
-              style={{ width: 72, height: 72, marginTop: -52, border: "4px solid var(--card)", background: "var(--card)" }}
+              style={{ width: 72, height: 72, marginTop: 0, border: "4px solid var(--card)", background: "var(--card)" }}
             >
               <span className="cx-stat-icon cx-tone-blue" style={{ width: "100%", height: "100%", borderRadius: 8, fontSize: 22 }}>
                 <i className="fas fa-gas-pump" aria-hidden />
@@ -152,6 +161,7 @@ export default function StationDetail() {
                   <>
                     {s.distance}
                     <small>km</small>
+                    {distanceNote(s) && <span className="block text-[11px] text-[var(--muted)] font-normal">{distanceNote(s)}</span>}
                   </>
                 ) : (
                   "—"
@@ -239,7 +249,7 @@ export default function StationDetail() {
             </div>
           </section>
 
-          {hasCoords && (
+          {directions && (
             <section className="cx-panel">
               <div className="cx-panel-head">
                 <h2 className="cx-panel-title">
@@ -287,7 +297,7 @@ export default function StationDetail() {
               <div className="cx-fact">
                 <dt>Distance</dt>
                 <dd className={s.distance != null ? "" : "is-empty"}>
-                  {s.distance != null ? `${s.distance} km` : "Set your location"}
+                  {s.distance != null ? `${s.distance} km${distanceNote(s) ? ` (${distanceNote(s)})` : ""}` : "Set your location"}
                 </dd>
               </div>
             </dl>

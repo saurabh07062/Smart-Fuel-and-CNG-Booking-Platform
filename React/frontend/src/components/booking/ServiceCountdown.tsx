@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { Booking } from "@/types";
-import { fallbackServiceSeconds } from "@/constants/booking";
 import { useBookingStore } from "@/store/bookingStore";
+import { useFuelingCountdown } from "@/hooks/useFuelingCountdown";
 
 interface Props {
   booking: Booking;
@@ -10,40 +10,21 @@ interface Props {
 /**
  * The live countdown shown while a booking is "serving".
  *
- * THIS DOES NOT COMPLETE THE BOOKING. backend/src/services/booking/bookingSweep.js's
- * sweepInProgressBookings is the sole authority: it polls every 5s and flips
- * the booking to "completed" once fuelingStartTime + serviceDurationSeconds
- * has elapsed. This component only *displays* the countdown to that event.
+ * THIS DOES NOT COMPLETE THE BOOKING. The server does, at exactly
+ * fuelingStartTime + serviceDurationSeconds (backend services/queue/serviceTimer.js,
+ * with the in-progress sweep as a backstop), then sends booking:completed and
+ * this page switches to the completed view.
  *
- * Because the remaining time is recomputed from the server's own
- * fuelingStartTime on every tick -- never decremented from a local counter --
- * it stays correct across a refresh, a backgrounded tab, or a slow frame, and
- * it can never show 00:00 before the backend would actually be allowed to
- * complete the booking.
+ * The remaining time is recomputed from the server's own values against the
+ * server's clock on every tick (hooks/useFuelingCountdown.ts), so a refresh, a
+ * reconnect or a wrong phone clock cannot restart or skew it.
  *
- * Durations come from the booking's serviceDurationSeconds, which the server
- * stamps from backend/config/fuelDurations.js (CNG 300s, petrol/diesel 40s).
- * The client-side fallback is only for older documents that predate the field.
+ * Durations are stamped by the server (backend config/fuelDurations.js):
+ * Petrol/Diesel 40 seconds, CNG 5 minutes.
  */
 export default function ServiceCountdown({ booking }: Props) {
   const loadBookings = useBookingStore((s) => s.load);
-
-  const startMs = booking.fuelingStartTime
-    ? new Date(booking.fuelingStartTime).getTime()
-    : Date.now();
-  const durationSec = booking.serviceDurationSeconds || fallbackServiceSeconds(booking.fuelType);
-  const dueMs = startMs + durationSec * 1000;
-
-  const [remainingSec, setRemainingSec] = useState(() =>
-    Math.max(0, Math.ceil((dueMs - Date.now()) / 1000)),
-  );
-
-  useEffect(() => {
-    const tick = () => setRemainingSec(Math.max(0, Math.ceil((dueMs - Date.now()) / 1000)));
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [dueMs]);
+  const { remainingSec, label, progress, finished } = useFuelingCountdown(booking);
 
   /**
    * Safety net, matching the Vanilla poll.
@@ -54,15 +35,13 @@ export default function ServiceCountdown({ booking }: Props) {
    * missed (a brief disconnect). It stops as soon as the status is no longer
    * "serving", because this component unmounts with the card.
    */
+  const timeLeft = remainingSec > 0;
   useEffect(() => {
-    if (remainingSec > 0) return;
+    if (timeLeft) return;
     const id = window.setInterval(() => void loadBookings(), 2000);
     return () => window.clearInterval(id);
-  }, [remainingSec > 0, loadBookings]);
+  }, [timeLeft, loadBookings]);
 
-  const mm = String(Math.floor(remainingSec / 60)).padStart(2, "0");
-  const ss = String(remainingSec % 60).padStart(2, "0");
-  const finished = remainingSec <= 0;
 
   return (
     <>
@@ -101,10 +80,26 @@ export default function ServiceCountdown({ booking }: Props) {
           role="timer"
           aria-live="off"
         >
-          {mm}:{ss}
+          {label}
         </p>
+        <div
+          className="h-2 rounded-full mt-4 overflow-hidden"
+          style={{ background: "var(--status-warn-bg)" }}
+          role="progressbar"
+          aria-label="Fueling progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${progress * 100}%`, background: "var(--status-warn)", transition: "width .25s linear" }}
+          />
+        </div>
         <p className="text-xs mt-3" style={{ color: "var(--muted)" }}>
-          This updates live from the station&apos;s system — no need to refresh.
+          {finished
+            ? "Completing your booking now…"
+            : "Fueling completes automatically — no need to refresh or press anything."}
         </p>
       </div>
     </>

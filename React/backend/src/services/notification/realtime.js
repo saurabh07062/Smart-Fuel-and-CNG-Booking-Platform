@@ -125,29 +125,40 @@ const RT_LOG = String(process.env.RT_LOG || "on").toLowerCase();
 const LOG_ON = RT_LOG !== "off" && RT_LOG !== "false" && RT_LOG !== "0";
 const LOG_VERBOSE = RT_LOG === "verbose";
 
+// Connects, joins and emits are per-socket detail: DEBUG level, so they are
+// hidden at the default LOG_LEVEL=info and shown with LOG_LEVEL=debug.
+// RT_LOG=off silences them entirely; RT_LOG=verbose adds the event payload.
+const rtLogger = require("../../utils/logger").child("realtime");
 function rtLog(msg, extra) {
   if (!LOG_ON) return;
-  const t = new Date().toTimeString().slice(0, 8);
-  if (extra !== undefined && LOG_VERBOSE) {
-    console.log(`[realtime ${t}] ${msg}`, extra);
-  } else {
-    console.log(`[realtime ${t}] ${msg}`);
-  }
+  const text = String(msg).replace(/\s+/g, " ").trim();
+  if (extra !== undefined && LOG_VERBOSE) rtLogger.debug(text, { payload: extra });
+  else rtLogger.debug(text);
 }
 
 /** How many sockets are currently in a room -- i.e. who will actually get this. */
 function roomSize(room) {
   if (!ioRef) return 0;
-  const r = ioRef.sockets.adapter.rooms.get(room);
-  return r ? r.size : 0;
+  const rooms = Array.isArray(room) ? room : [room];
+  const sockets = new Set();
+  for (const name of rooms) {
+    for (const id of ioRef.sockets.adapter.rooms.get(name) || []) sockets.add(id);
+  }
+  return sockets.size;
 }
+
+/**
+ * Every connection, signed in or not, is in this room. Public station changes
+ * (the same whitelisted view GET /api/stations returns) go here, so a
+ * station list, the dashboard's nearby stations and the booking picker update
+ * live -- not only the one station detail page that happens to be watching.
+ */
+const PUBLIC_STATIONS_ROOM = "stations";
 
 /** Called once from server.js with the Socket.IO server. */
 function init(io) {
   ioRef = io;
-  rtLog(
-    `ready -- logging ${LOG_VERBOSE ? "VERBOSE" : "on"} (set RT_LOG=off in .env to silence)`,
-  );
+  rtLogger.info("Socket.IO ready");
 
   /**
    * Authenticate every connection before it can join anything.
@@ -163,7 +174,11 @@ function init(io) {
   io.use(async (socket, next) => {
     const session = require("../security/session");
     const { ACCESS_COOKIE } = require("../../config/auth");
+    // A tab with its own session (services/security/session.js) names it in
+    // the handshake; its cookie wins over the browser's shared one.
+    const tab = session.tabOf({ headers: { [session.TAB_HEADER]: socket.handshake.auth && socket.handshake.auth.tab } });
     const token =
+      (tab && session.readCookie(socket.request.headers.cookie, session.tabAccessCookie(tab))) ||
       session.readCookie(socket.request.headers.cookie, ACCESS_COOKIE) ||
       (socket.handshake.auth && socket.handshake.auth.token) ||
       socket.handshake.query.token ||
@@ -186,6 +201,7 @@ function init(io) {
   });
 
   io.on("connection", (socket) => {
+    socket.join(PUBLIC_STATIONS_ROOM);
     // Handlers are registered BEFORE the identity lookup below, never after.
     // The client emits watch_station the instant it connects (and re-emits
     // every watched station after a reconnect). When these handlers were
@@ -305,12 +321,15 @@ function io() {
  * ignores the alias. The alias exists purely for bundles cached before this
  * shipped.
  */
-function emitBoth(room, eventName, payload) {
+function emitBoth(room, eventName, payload, except = []) {
   // Accept either name; always send canonical + its legacy alias exactly once.
+  // `room` may be several rooms: socket.io delivers once per socket across
+  // them. `except` rooms are left out (they get their own, fuller copy).
   const event = CANONICAL_FROM_LEGACY[eventName] || eventName;
-  ioRef.to(room).emit(event, payload);
+  const target = () => (except.length ? ioRef.to(room).except(except) : ioRef.to(room));
+  target().emit(event, payload);
   const legacy = LEGACY_ALIAS[event];
-  if (legacy && legacy !== event) ioRef.to(room).emit(legacy, payload);
+  if (legacy && legacy !== event) target().emit(legacy, payload);
 
   // The count is the useful part: "-> 0 clients" is the difference between
   // "the event fired and nobody was listening" and "the event never fired",
@@ -357,12 +376,22 @@ function toStation(stationId, event, payload) {
  * station's payments settle into -- would end up in every browser.
  */
 function stationChanged(event, station, extra = {}) {
-  if (!station) return;
+  if (!station || !ioRef) return;
   const id = station._id || station.id;
-  const publicView = publicStation(station);
+  // `id` set explicitly: a deletion is announced as just { id }, and the
+  // public view reads `_id`, so it came out as {} and the client could not
+  // tell which station to remove.
+  const publicView = { ...publicStation(station), id: id ? String(id) : undefined };
+  const ownerRoom = station.owner ? `vendor:${String(station.owner)}` : null;
 
-  toStation(id, event, { ...publicView, ...extra });
-  if (station.owner) toVendor(station.owner, event, { ...toPlain(station), ...extra });
+  // The public view to everyone -- every open station list, plus the station's
+  // own watchers -- once per socket. The owner and admins are left out here
+  // because they get the full record below; otherwise their screens would
+  // apply (and toast) the same change twice.
+  const publicRooms = id ? [PUBLIC_STATIONS_ROOM, `station:${String(id)}`] : [PUBLIC_STATIONS_ROOM];
+  emitBoth(publicRooms, event, { ...publicView, ...extra }, ["admin", ...(ownerRoom ? [ownerRoom] : [])]);
+
+  if (ownerRoom) toRoom(ownerRoom, event, { ...toPlain(station), ...extra });
   toAdmins(event, { ...toPlain(station), ...extra });
 }
 
@@ -392,8 +421,42 @@ function bookingChanged(event, booking, { stationOwner } = {}) {
   const owner = stationOwner || (b.station && b.station.owner);
 
   if (customerId) toUser(customerId, event, b);
-  if (owner) toVendor(owner, event, b);
   toAdmins(event, b);
+  if (owner) {
+    toVendor(owner, event, b);
+    return;
+  }
+  // A caller that did not pass the owner (the booking holds only the station
+  // id) used to skip the vendor entirely: an admin cancelling or completing
+  // an order never reached the vendor panel. Look the owner up instead.
+  const stationId = b.station && (b.station._id || b.station);
+  if (!stationId || !ioRef) return;
+  require("../../models/Station")
+    .findById(stationId)
+    .select("owner")
+    .lean()
+    .then((s) => s?.owner && toVendor(s.owner, event, b))
+    .catch((err) => rtLogger.error("Could not resolve the station owner for a booking event", { event, err }));
+}
+
+/**
+ * A vendor account changed (applied, reviewed, approved, rejected, suspended,
+ * reactivated, edited, deleted): tell admins, and the vendor themselves.
+ * Only status fields -- never documents, codes or contact details.
+ */
+function vendorChanged(event, vendor, extra = {}) {
+  if (!vendor) return;
+  const v = toPlain(vendor);
+  const payload = {
+    vendorId: String(v._id || v.id),
+    name: v.name,
+    businessName: v.businessName,
+    vendorStatus: v.vendorStatus,
+    activated: v.activated,
+    ...extra,
+  };
+  toAdmins(event, payload);
+  toUser(payload.vendorId, event, payload);
 }
 
 /**
@@ -420,6 +483,8 @@ module.exports = {
   toStation,
   stationChanged,
   bookingChanged,
+  vendorChanged,
+  PUBLIC_STATIONS_ROOM,
   publicStation,
   disconnectUser,
 };

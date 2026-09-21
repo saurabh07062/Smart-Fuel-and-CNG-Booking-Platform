@@ -2,10 +2,11 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import { useLeafletMap, PUNE } from "@/hooks/useLeafletMap";
 import { isValidCoordinate } from "@/utils/geo";
+import { MapLayerSwitch, pinIcon, useBaseLayer } from "./mapTheme";
 
 /**
- * Pick a station's exact location: click the map or drag the pin
- * (Leaflet + OpenStreetMap tiles, no API key).
+ * Pick a station's exact location: click the map or drag the pin (Leaflet,
+ * keyless tiles: OpenStreetMap street map, Esri satellite imagery -- see mapTheme.tsx).
  *
  * Two-way: the pin follows `lat`/`lng` when they change from outside (typed
  * inputs, "use my location", a pre-filled registration pin) and reports every
@@ -20,7 +21,7 @@ export default function StationPinPicker({
   onChange,
   followPin = false,
   id,
-  className = "w-full h-56 rounded-xl overflow-hidden",
+  className = "fm-picker-map",
 }: {
   lat: string;
   lng: string;
@@ -33,20 +34,33 @@ export default function StationPinPicker({
   const parsed = { lat: parseFloat(lat), lng: parseFloat(lng) };
   const hasCoords = isValidCoordinate(parsed.lat, parsed.lng);
 
-  const { containerRef, mapRef, ready } = useLeafletMap(
-    hasCoords ? { center: [parsed.lat, parsed.lng], zoom: 15 } : { center: PUNE, zoom: 12 },
-  );
+  const { containerRef, mapRef, ready } = useLeafletMap({
+    ...(hasCoords ? { center: [parsed.lat, parsed.lng] as [number, number], zoom: 16 } : { center: PUNE, zoom: 12 }),
+    baseTiles: false,
+  });
   const markerRef = useRef<L.Marker | null>(null);
+  const { layer, setLayer } = useBaseLayer(mapRef.current, ready);
 
   // Held in a ref so the map click handler binds once and cannot capture a
   // stale callback.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  // The last point this map reported itself (a click or a drag). A pin that
+  // arrives as anything else -- typed latitude/longitude, "use my location" --
+  // came from outside, and the map moves to it.
+  const lastReportedRef = useRef<{ lat: number; lng: number } | null>(null);
+  const report = (la: number, ln: number) => {
+    lastReportedRef.current = { lat: la, lng: ln };
+    onChangeRef.current(la, ln);
+  };
+  const reportRef = useRef(report);
+  reportRef.current = report;
+
   useEffect(() => {
     const map = mapRef.current;
     if (!ready || !map) return;
-    const handler = (e: L.LeafletMouseEvent) => onChangeRef.current(e.latlng.lat, e.latlng.lng);
+    const handler = (e: L.LeafletMouseEvent) => reportRef.current(e.latlng.lat, e.latlng.lng);
     map.on("click", handler);
     return () => {
       map.off("click", handler);
@@ -70,25 +84,61 @@ export default function StationPinPicker({
     } else {
       const marker = L.marker([parsed.lat, parsed.lng], {
         draggable: true,
-        icon: L.divIcon({
-          html: '<div class="text-2xl">📍</div>',
-          className: "bg-transparent border-none",
-          iconSize: [24, 24],
-          iconAnchor: [12, 24],
-        }),
+        autoPan: true,
+        keyboard: true,
+        title: "Station location -- drag to adjust",
+        icon: pinIcon({ pulse: true }),
       }).addTo(map);
 
       marker.on("dragend", (ev) => {
         const p = (ev.target as L.Marker).getLatLng();
-        onChangeRef.current(p.lat, p.lng);
+        reportRef.current(p.lat, p.lng);
       });
       markerRef.current = marker;
     }
 
-    if (followPin && !map.getBounds().contains([parsed.lat, parsed.lng])) {
-      map.setView([parsed.lat, parsed.lng], Math.max(map.getZoom(), 15));
+    if (followPin) {
+      // Rounded when stored (toFixed(6)), so compare to within that precision.
+      const last = lastReportedRef.current;
+      const fromThisMap =
+        last && Math.abs(last.lat - parsed.lat) < 1e-6 && Math.abs(last.lng - parsed.lng) < 1e-6;
+      // Typed or located: centre on it. Clicked or dragged: the vendor is
+      // already looking there; only follow if it somehow left the screen.
+      if (!fromThisMap || !map.getBounds().contains([parsed.lat, parsed.lng])) {
+        // Close enough to see the forecourt itself, so a pin a few hundred
+        // metres off is obvious before saving.
+        map.setView([parsed.lat, parsed.lng], Math.max(map.getZoom(), 17));
+      }
     }
   }, [ready, mapRef, hasCoords, parsed.lat, parsed.lng, followPin]);
 
-  return <div ref={containerRef} id={id} className={className} style={{ border: "1px solid var(--z-line)" }} />;
+  const coordText = hasCoords ? `${parsed.lat.toFixed(6)}, ${parsed.lng.toFixed(6)}` : null;
+
+  return (
+    <div className="fm-picker">
+      <div ref={containerRef} id={id} className={className} />
+
+      <MapLayerSwitch layer={layer} onChange={setLayer} />
+
+      <div className="fm-picker-overlay fm-picker-chip" aria-live="polite">
+        <div>
+          <span className={`fm-dot ${coordText ? "is-set" : ""}`} aria-hidden />
+          {coordText ? (
+            <>
+              <code>{coordText}</code>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${parsed.lat},${parsed.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Check in Google Maps ↗
+              </a>
+            </>
+          ) : (
+            <span>Click the map to drop the pin on the pump</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }

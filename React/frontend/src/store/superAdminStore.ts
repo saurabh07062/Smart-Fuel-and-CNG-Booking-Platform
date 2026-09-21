@@ -12,6 +12,8 @@ interface SuperAdminState {
 
   setTab: (tab: SaTab) => void;
   load: () => Promise<void>;
+  /** Refetch after a live event without the loading skeleton; a failure keeps what is shown. */
+  refreshLive: () => Promise<void>;
   reset: () => void;
 }
 
@@ -48,6 +50,14 @@ export const useSuperAdminStore = create<SuperAdminState>((set) => ({
               ? "The server could not return the global dashboard."
               : "Could not reach the server. Is the backend running?",
       });
+    }
+  },
+
+  refreshLive: async () => {
+    try {
+      set({ data: await api.fetchSuperAdminDashboard() });
+    } catch {
+      /* keep what is on screen; the next event or a manual refresh retries */
     }
   },
 

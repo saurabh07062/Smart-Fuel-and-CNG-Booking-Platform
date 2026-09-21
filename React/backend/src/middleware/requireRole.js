@@ -32,7 +32,14 @@ const ensureRole = (role) => {
       return next();
     }
 
-    return res.status(403).json({ msg: 'Forbidden' });
+    // Usually another tab in the same browser signed in with a different
+    // account: the browser holds one session, so say which one it is.
+    const needed = allowed.join(' or ');
+    return res.status(403).json({
+      msg: `This page needs a ${needed} account, but this browser is now signed in as a ${userRole || 'different user'}. Sign in again as the ${needed}.`,
+      reason: 'WRONG_ROLE',
+      role: userRole || null,
+    });
   };
 };
 

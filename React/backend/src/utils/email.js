@@ -22,4 +22,23 @@ function emailLookup(value) {
   return { email: new RegExp(`^${escapeRegex(email)}$`, "i") };
 }
 
-module.exports = { normaliseEmail, emailLookup };
+/**
+ * The user with this address. New accounts are stored lowercase, so the exact
+ * match (which uses the unique email index) finds almost everyone; only an
+ * older mixed-case record falls through to the case-insensitive scan.
+ * `project` is an optional .select() string; the result is a lean object when
+ * `lean` is true, otherwise a document.
+ */
+async function findUserByEmail(value, { project, lean = false } = {}) {
+  const User = require("../models/User");
+  const email = normaliseEmail(value);
+  if (!email) return null;
+  const run = (filter) => {
+    let q = User.findOne(filter);
+    if (project) q = q.select(project);
+    return lean ? q.lean() : q;
+  };
+  return (await run({ email })) || run(emailLookup(email));
+}
+
+module.exports = { normaliseEmail, emailLookup, findUserByEmail };

@@ -126,7 +126,7 @@ test("booking integrity through POST /api/bookings", async (t) => {
       assert.equal(r.body.reason, "INSUFFICIENT_STOCK");
     });
 
-    await t.test("10 customers racing for one slot: exactly one booking persists", async () => {
+    await t.test("10 customers racing for one CNG window: it fills to capacity (6), never beyond, never overlapping", async () => {
       const racers = customers.slice(2, 12);
       const results = await Promise.all(racers.map((c) => book(c, { fuelType: "CNG", quantity: 5, timeSlot: "10:00 AM" })));
 
@@ -135,8 +135,13 @@ test("booking integrity through POST /api/bookings", async (t) => {
       const persisted = await Booking.countDocuments({ station: station._id, bookingDate: date, timeSlot: "10:00 AM", status: "upcoming" });
 
       console.log(`\n  10 concurrent: ${ok.length} confirmed, ${refused.length} refused, db upcoming=${persisted}\n`);
-      assert.equal(persisted, 1, "exactly one active booking at the contended slot");
-      assert.equal(ok.length, 1);
+      // floor(1800 s / 300 s) = 6 CNG fills fit the window on its one CNG nozzle.
+      assert.equal(persisted, ok.length, "every confirmed booking is stored, nothing else");
+      assert.ok(ok.length >= 1 && ok.length <= 6, `${ok.length} confirmed: never more than the window holds`);
+      const spans = (await Booking.find({ station: station._id, bookingDate: date, timeSlot: "10:00 AM", status: "upcoming" }).lean())
+        .map((b) => [new Date(b.bookingStartTime).getTime(), new Date(b.bookingEndTime).getTime()])
+        .sort((a, b) => a[0] - b[0]);
+      for (let i = 1; i < spans.length; i++) assert.ok(spans[i][0] >= spans[i - 1][1], "no two overlap on the CNG nozzle");
       assert.equal(ok.length + refused.length, racers.length, "every request gets a definite answer");
     });
 

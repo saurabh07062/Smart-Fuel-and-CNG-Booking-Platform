@@ -8,6 +8,13 @@ import { getFreshUserCoords, isValidCoordinate } from "@/utils/geo";
 import StationPinPicker from "@/components/maps/StationPinPicker";
 import { VendorEmpty, VendorHeading } from "../VendorBits";
 import PriceHistoryModal from "../PriceHistoryModal";
+import StationImagesEditor from "../StationImagesEditor";
+import StationDetailsEditor from "../StationDetailsEditor";
+import NozzleModes from "../NozzleModes";
+import SlotTimings from "../SlotTimings";
+import { coordinateError, parseCoordinatePair } from "@/utils/coordinates";
+import { useAuthStore } from "@/store/authStore";
+import { VENDOR_FUELS, soldFuels } from "@/utils/vendorFuels";
 
 const EMPTY_FORM = {
   name: "",
@@ -28,15 +35,38 @@ export default function StationsTab() {
   const setTab = useVendorStore((s) => s.setTab);
   const openPriceHistory = useVendorStore((s) => s.openPriceHistory);
 
+  // Only the fuels this vendor registered for (all three for older vendors).
+  const vendorFuelTypes = useAuthStore((s) => s.user?.vendorFuelTypes);
+  const fuels = VENDOR_FUELS.filter((f) => soldFuels(vendorFuelTypes).includes(f.key));
+
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = editingId ? stations.find((s) => String(s._id) === editingId) : undefined;
 
   const set = (k: keyof typeof EMPTY_FORM, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  /** A pasted Google Maps pair ("18.580563, 73.975342") fills both boxes from the same spot. */
+  const setCoordinate = (k: "lat" | "lng", value: string) => {
+    const pair = parseCoordinatePair(value);
+    if (pair) setForm((f) => ({ ...f, lat: pair.lat, lng: pair.lng }));
+    else set(k, value.trim());
+  };
   const setPin = (lat: number, lng: number) =>
     setForm((f) => ({ ...f, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
-  const pinned = isValidCoordinate(parseFloat(form.lat), parseFloat(form.lng));
+  const latError = coordinateError(form.lat, "Latitude", 90);
+  const lngError = coordinateError(form.lng, "Longitude", 180);
+  // Number() rather than parseFloat: "18.5abc" is a typo, not 18.5.
+  const pinned = !latError && !lngError && isValidCoordinate(Number(form.lat), Number(form.lng));
+
+  // A vendor with no stations yet (just approved and signed in) lands on this
+  // form already open, once their station list has actually loaded.
+  const loading = useVendorStore((s) => s.loading);
+  const noStations = stations.length === 0;
+  useEffect(() => {
+    if (loading === false && noStations) setShowAdd(true);
+  }, [loading, noStations]);
 
   // A vendor's first station starts from the pin they dropped when they
   // registered (stored on their profile). Never overrides a pin already set,
@@ -61,7 +91,7 @@ export default function StationsTab() {
     };
   }, [showAdd, firstStation]);
 
-  const useMyLocation = async () => {
+  const fillMyLocation = async () => {
     setLocating(true);
     const fix = await getFreshUserCoords();
     setLocating(false);
@@ -78,8 +108,12 @@ export default function StationsTab() {
       return;
     }
     // Without a position the station never appears in nearest-station search.
+    if (latError || lngError) {
+      pushToast(latError || lngError || "", "error");
+      return;
+    }
     if (!pinned) {
-      pushToast("Pin the station's exact location on the map", "error");
+      pushToast("Enter the latitude and longitude, or pin the station's exact location on the map", "error");
       return;
     }
     setBusy(true);
@@ -87,13 +121,12 @@ export default function StationsTab() {
       await api.createVendorStation({
         name: form.name,
         address: form.address,
-        prices: {
-          petrol: parseFloat(form.petrol),
-          diesel: parseFloat(form.diesel),
-          cng: parseFloat(form.cng),
-        },
+        // Only the fuels this vendor sells.
+        fuelTypes: fuels.map((f) => f.label),
+        prices: Object.fromEntries(fuels.map((f) => [f.key, parseFloat(form[f.key])])),
         openingHours: form.hours || "24 Hours",
-        coordinates: { lat: parseFloat(form.lat), lng: parseFloat(form.lng) },
+        // Exactly what was typed or pinned.
+        coordinates: { lat: Number(form.lat), lng: Number(form.lng) },
       });
       pushToast("Station created successfully!", "success");
       setShowAdd(false);
@@ -172,33 +205,18 @@ export default function StationsTab() {
                 onChange={(e) => set("address", e.target.value)}
               />
             </Field>
-            <Field label="Petrol Price (₹/L)">
-              <input
-                type="number"
-                step="0.01"
-                className="w-full vm-input px-4 py-2.5 text-sm vm-text"
-                value={form.petrol}
-                onChange={(e) => set("petrol", e.target.value)}
-              />
-            </Field>
-            <Field label="Diesel Price (₹/L)">
-              <input
-                type="number"
-                step="0.01"
-                className="w-full vm-input px-4 py-2.5 text-sm vm-text"
-                value={form.diesel}
-                onChange={(e) => set("diesel", e.target.value)}
-              />
-            </Field>
-            <Field label="CNG Price (₹/Kg)">
-              <input
-                type="number"
-                step="0.01"
-                className="w-full vm-input px-4 py-2.5 text-sm vm-text"
-                value={form.cng}
-                onChange={(e) => set("cng", e.target.value)}
-              />
-            </Field>
+            {fuels.map((f) => (
+              <Field key={f.key} label={`${f.label} Price (₹/${f.unit})`}>
+                <input
+                  type="number"
+                  step="0.01"
+                  aria-label={`${f.label} Price`}
+                  className="w-full vm-input px-4 py-2.5 text-sm vm-text"
+                  value={form[f.key]}
+                  onChange={(e) => set(f.key, e.target.value)}
+                />
+              </Field>
+            ))}
             <Field label="Opening Hours">
               <input
                 type="text"
@@ -210,16 +228,57 @@ export default function StationsTab() {
           </div>
           <div className="mt-4">
             <label className="block text-xs font-bold vm-text-muted mb-2">Station Location *</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+              <Field label="Latitude *">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label="Latitude"
+                  aria-invalid={Boolean(latError)}
+                  className="w-full vm-input px-4 py-2.5 text-sm vm-text"
+                  placeholder="-90 to 90"
+                  value={form.lat}
+                  onChange={(e) => setCoordinate("lat", e.target.value)}
+                />
+                {latError && (
+                  <p role="alert" className="text-xs mt-1" style={{ color: "var(--status-bad)" }}>
+                    {latError}
+                  </p>
+                )}
+              </Field>
+              <Field label="Longitude *">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label="Longitude"
+                  aria-invalid={Boolean(lngError)}
+                  className="w-full vm-input px-4 py-2.5 text-sm vm-text"
+                  placeholder="-180 to 180"
+                  value={form.lng}
+                  onChange={(e) => setCoordinate("lng", e.target.value)}
+                />
+                {lngError && (
+                  <p role="alert" className="text-xs mt-1" style={{ color: "var(--status-bad)" }}>
+                    {lngError}
+                  </p>
+                )}
+              </Field>
+            </div>
             <StationPinPicker lat={form.lat} lng={form.lng} onChange={setPin} followPin />
-            <div className="flex flex-wrap items-center justify-between gap-2 mt-2 text-xs vm-text-muted">
-              <span data-testid="pin-status">
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-xs vm-text-muted">
+              <span data-testid="pin-status" className="flex items-center gap-2">
+                <i
+                  className={`fas ${pinned ? "fa-circle-check" : "fa-location-dot"}`}
+                  style={{ color: pinned ? "var(--z-green)" : "var(--z-light)" }}
+                  aria-hidden
+                />
                 {pinned
                   ? `Pinned at ${form.lat}, ${form.lng}. Drag the pin to adjust.`
-                  : "Click the map, or drag the pin, onto the pump's exact location."}
+                  : "Type the latitude and longitude, or click the map onto the pump's exact location."}
               </span>
               <button
                 type="button"
-                onClick={() => void useMyLocation()}
+                onClick={() => void fillMyLocation()}
                 disabled={locating}
                 className="vm-bg-ground vm-hover border vm-border rounded-lg px-3 py-1.5 font-bold transition-colors"
               >
@@ -246,6 +305,23 @@ export default function StationsTab() {
         </div>
       )}
 
+      {editing && (
+        <>
+          <StationDetailsEditor
+            key={`details-${editingId}`}
+            station={editing}
+            onSaved={loadStations}
+            onClose={() => setEditingId(null)}
+          />
+          <StationImagesEditor
+            key={`photos-${editingId}`}
+            station={editing}
+            onClose={() => setEditingId(null)}
+            onSaved={loadStations}
+          />
+        </>
+      )}
+
       {stations.length === 0 ? (
         <VendorEmpty
           icon="fa-gas-pump"
@@ -267,6 +343,7 @@ export default function StationsTab() {
               onPrices={() => void openPriceHistory(String(s._id))}
               onToggle={() => void toggleStatus(String(s._id))}
               onDelete={() => void remove(String(s._id))}
+              onEdit={() => setEditingId(String(s._id))}
             />
           ))}
         </div>
@@ -292,14 +369,22 @@ function StationCard({
   onPrices,
   onToggle,
   onDelete,
+  onEdit,
 }: {
   station: VendorStation;
   onBookings: () => void;
   onPrices: () => void;
   onToggle: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
+  const pumpPhotos = (
+    [
+      ["Petrol pump", uploadUrl(s.pumpImages?.petrol ?? null)],
+      ["CNG pump", uploadUrl(s.pumpImages?.cng ?? null)],
+    ] as const
+  ).filter(([, url]) => url);
   const photo = s.images?.length ? uploadUrl(s.images[0]) : null;
   const statusCls =
     s.status === "Active"
@@ -340,7 +425,8 @@ function StationCard({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-        {(["petrol", "diesel", "cng"] as const).map((f) => (
+        {/* Only the fuels this station sells. */}
+        {soldFuels(s.fuelTypes).map((f) => (
           <div key={f} className="vm-bg-ground p-3 rounded-lg border vm-border">
             <p className="text-[10px] vm-text-muted uppercase">{f}</p>
             <p className="font-bold text-sm">₹{prices[f] ?? "N/A"}</p>
@@ -348,13 +434,38 @@ function StationCard({
         ))}
       </div>
 
+      <NozzleModes station={s} />
+      <SlotTimings station={s} />
+
       <div className="flex items-center gap-2 text-xs vm-text-muted mb-4">
         <span>{s.fuelTypes?.join(", ") || "No fuels listed"}</span>
         <span>•</span>
         <span>{s.openingHours || "24 Hours"}</span>
       </div>
 
+      {pumpPhotos.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          {pumpPhotos.map(([label, url]) => (
+            <figure key={label} className="m-0">
+              <img
+                src={url as string}
+                alt={`${label} image`}
+                className="w-full h-24 object-cover rounded-lg"
+                style={{ border: "1px solid var(--z-line)" }}
+              />
+              <figcaption className="text-[10px] vm-text-muted uppercase mt-1">{label}</figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
+        <button
+          onClick={onEdit}
+          className="flex-1 vm-bg-ground vm-hover border vm-border rounded-lg py-2 text-xs font-bold transition-colors"
+        >
+          <i className="fas fa-pen-to-square mr-1" aria-hidden /> Edit Station
+        </button>
         <button
           onClick={onBookings}
           className="flex-1 vm-bg-ground vm-hover border vm-border rounded-lg py-2 text-xs font-bold transition-colors"

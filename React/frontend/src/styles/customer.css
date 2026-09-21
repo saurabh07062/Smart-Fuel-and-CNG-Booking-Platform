@@ -2037,3 +2037,100 @@ button.cx-kpi:focus-visible {
     transform: none;
   }
 }
+
+/* A station photo in the page cover: the whole scene, scaled to fit. Placed
+   last because the theme's `background:` shorthand above resets size and
+   position, which drew the photo at full size from its top-left corner. */
+.cx-detail-cover.has-image {
+  height: 260px;
+  background-color: #111;
+  background-size: cover;
+  background-position: center 60%;
+  background-repeat: no-repeat;
+}
+@media (max-width: 640px) {
+  .cx-detail-cover.has-image {
+    height: 170px;
+  }
+}
+
+/* A long page title (e.g. the greeting) ends in an ellipsis instead of spilling out of the bar. */
+.cx-top-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The app's own accent (quick actions and other brand icons): follows the chosen colour. */
+.cx-tone-brand { background: var(--primary-light); color: var(--primary); }
+
+/* ---------------------------------------------------- green app colour
+   Chosen in the account menu (uiStore accent, data-accent on <html>).
+   Only the brand accent changes; red stays for errors and "closed". */
+[data-accent="green"] .cx-app,
+[data-accent="green"] body:has(.cx-app) {
+  --primary: #1a8f4a;
+  --primary-light: #e9f6ee;
+  --cx-primary-dark: #137239;
+  --cx-primary-line: #b7e0c5;
+  --cx-ring: rgba(26, 143, 74, 0.18);
+}
+[data-accent="green"][data-theme="dark"] .cx-app,
+[data-accent="green"][data-theme="dark"] body:has(.cx-app) {
+  --primary: #34c26b;
+  --primary-light: #12301d;
+  --cx-primary-dark: #1a8f4a;
+  --cx-primary-line: #245c38;
+  --cx-ring: rgba(52, 194, 107, 0.25);
+}
+[data-accent="green"] body:has(.cx-app) .btn-primary:hover {
+  box-shadow: 0 4px 14px rgba(26, 143, 74, 0.28);
+}
+[data-accent="green"] .cx-slot.is-selected {
+  box-shadow: 0 6px 14px -6px rgba(26, 143, 74, 0.55);
+}
+[data-accent="green"] .cx-bottomnav a.is-primary i {
+  box-shadow: 0 8px 18px -6px rgba(26, 143, 74, 0.55);
+}
+[data-accent="green"] .cx-detail-cover:not(.has-image) {
+  background: linear-gradient(135deg, #137239 0%, #3fc47a 100%);
+}
+
+/* ---------------------------------------------------- fuel filter chips
+   Stations page: large pills with the fuel icons (FuelIcon.tsx). The
+   selected chip keeps the app colour (red or green). */
+.cx-fuel-chip {
+  padding: 10px 22px 10px 14px;
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 600;
+  gap: 10px;
+  border-width: 1.5px;
+  flex-shrink: 0;
+  color: var(--text);
+}
+.cx-fuel-chip.is-on {
+  box-shadow: 0 0 0 3px var(--cx-ring);
+}
+.cx-fuel-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.cx-fuel-ico.is-all,
+.cx-fuel-ico.is-diesel {
+  color: var(--text);
+}
+@media (max-width: 640px) {
+  .cx-fuel-chip {
+    min-height: 44px;
+    font-size: 15px;
+    padding: 8px 18px 8px 12px;
+  }
+}
+
+/* Customer maps (Map / Satellite switch, map buttons) follow the app colour. */
+.cx-app .fm-picker,
+body:has(.cx-app) .fm-picker {
+  --pk-accent: var(--primary);
+}

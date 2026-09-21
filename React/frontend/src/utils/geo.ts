@@ -1,4 +1,5 @@
 import type { Coordinates } from "@/types";
+import { isNativeApp } from "./nativeApp";
 
 /**
  * Coordinate helpers, ported verbatim from frontend/js/utils.js.
@@ -70,28 +71,98 @@ export function rememberUserCoords(lat: number, lng: number) {
  * default). Resolves null on denial/failure so the caller can show a real
  * error state instead of silently routing from a made-up point.
  */
-export function getFreshUserCoords({ timeout = 10000 } = {}): Promise<FixedCoords | null> {
+export function getFreshUserCoords({ timeout = 12000, goodEnoughMeters = GPS_GOOD_ENOUGH_M } = {}): Promise<FixedCoords | null> {
+  // In the customer Android app the phone's own GPS is used (the WebView's
+  // browser location is refused on a plain http:// site).
+  if (isNativeApp()) return nativeFreshCoords({ timeout, goodEnoughMeters });
+  return browserFreshCoords({ timeout, goodEnoughMeters });
+}
+
+/**
+ * The same "keep the most accurate reading" rule, through the native GPS
+ * (@capacitor/geolocation), asking for the location permission if needed.
+ */
+async function nativeFreshCoords({ timeout, goodEnoughMeters }: { timeout: number; goodEnoughMeters: number }): Promise<FixedCoords | null> {
+  const { Geolocation } = await import("@capacitor/geolocation");
+  try {
+    const current = await Geolocation.checkPermissions();
+    if (current.location !== "granted") {
+      const asked = await Geolocation.requestPermissions({ permissions: ["location"] });
+      if (asked.location !== "granted") return null;
+    }
+  } catch {
+    return null; // location switched off on the phone
+  }
+  return new Promise((resolve) => {
+    let best: FixedCoords | null = null;
+    let done = false;
+    let watchId: string | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      if (watchId) void Geolocation.clearWatch({ id: watchId });
+      if (best) rememberUserCoords(best.lat, best.lng);
+      resolve(best);
+    };
+    const timer = window.setTimeout(finish, timeout);
+    void Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 0, timeout }, (pos, err) => {
+      if (err || !pos) return finish();
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+      if (!isValidCoordinate(lat, lng)) return;
+      if (!best || accuracy < (best.accuracy ?? Infinity)) best = { lat, lng, accuracy, timestamp: pos.timestamp };
+      if (accuracy <= goodEnoughMeters) finish();
+    })
+      .then((id) => {
+        watchId = id;
+        if (done) void Geolocation.clearWatch({ id });
+      })
+      .catch(() => finish());
+  });
+}
+
+function browserFreshCoords({ timeout, goodEnoughMeters }: { timeout: number; goodEnoughMeters: number }): Promise<FixedCoords | null> {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       resolve(null);
       return;
     }
-    navigator.geolocation.getCurrentPosition(
+    // The first reading is often a coarse Wi-Fi / network estimate that
+    // arrives before the GPS has a lock. Keep listening (high accuracy = GPS
+    // when the device has it) and use the most accurate reading, stopping as
+    // soon as one is within `goodEnoughMeters` or the time is up.
+    let best: FixedCoords | null = null;
+    let done = false;
+    let watchId: number | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      window.clearTimeout(timer);
+      if (best) rememberUserCoords(best.lat, best.lng);
+      resolve(best);
+    };
+    const timer = window.setTimeout(finish, timeout);
+    watchId = navigator.geolocation.watchPosition(
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        if (!isValidCoordinate(lat, lng)) {
-          resolve(null);
-          return;
-        }
-        rememberUserCoords(lat, lng);
-        resolve({ lat, lng, accuracy: pos.coords.accuracy, timestamp: pos.timestamp });
+        if (!isValidCoordinate(lat, lng)) return;
+        const accuracy = pos.coords.accuracy;
+        if (!best || accuracy < (best.accuracy ?? Infinity)) best = { lat, lng, accuracy, timestamp: pos.timestamp };
+        if (accuracy <= goodEnoughMeters) finish();
       },
-      () => resolve(null),
+      // Denied or unavailable: stop now (with whatever reading there is).
+      () => finish(),
       { enableHighAccuracy: true, maximumAge: 0, timeout },
     );
   });
 }
+
+/** A fix this close (metres) is GPS quality: stop listening. */
+export const GPS_GOOD_ENOUGH_M = 30;
+/** Beyond this (metres) the fix is too rough to trust without checking the pin. */
+export const GPS_POOR_ACCURACY_M = 200;
 
 /**
  * Best-effort LAST-KNOWN coordinates from what getFreshUserCoords persisted.

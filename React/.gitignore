@@ -8,6 +8,7 @@ node_modules/
 
 # Build output and caches
 dist/
+dist-customer/
 *.tsbuildinfo
 
 # Runtime user uploads (the folder's own .gitignore keeps it in place)

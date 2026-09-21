@@ -82,3 +82,18 @@ export async function setDefaultVehicle(id: string): Promise<Vehicle[]> {
   const { data } = await apiClient.patch<VehiclesResponse>(`/customer/vehicles/${id}/default`);
   return data.vehicles ?? [];
 }
+
+/** POST /customer/profile/image (multipart field "profileImage") -- the new photo's path. */
+export async function uploadProfileImage(file: File): Promise<string | null> {
+  const fd = new FormData();
+  fd.append("profileImage", file);
+  const { data } = await apiClient.post<{ profileImage?: string | null }>("/customer/profile/image", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data.profileImage ?? null;
+}
+
+/** DELETE /customer/profile/image -- back to the initials. */
+export async function removeProfileImage(): Promise<void> {
+  await apiClient.delete("/customer/profile/image");
+}

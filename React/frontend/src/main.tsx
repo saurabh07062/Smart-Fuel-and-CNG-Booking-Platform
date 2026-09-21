@@ -15,7 +15,8 @@ import "./index.css";
  */
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <BrowserRouter>
+    {/* "/app" in the customer app build (vite.config.ts base), "/" on the website. */}
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "") || undefined}>
       <App />
     </BrowserRouter>
   </React.StrictMode>,

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FuelMart mark: a white fuel pump, drawn inside the adaptive-icon safe zone (108dp canvas, ~66dp centre). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- pump body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,32 h22 a4,4 0 0 1 4,4 v42 h-30 v-42 a4,4 0 0 1 4,-4 z" />
+    <!-- display window -->
+    <path
+        android:fillColor="#E23744"
+        android:pathData="M40,38 h18 v12 h-18 z" />
+    <!-- base -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,78 h38 a2,2 0 0 1 2,2 v2 h-42 v-2 a2,2 0 0 1 2,-2 z" />
+    <!-- hose -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M64,44 h4 a4,4 0 0 1 4,4 v18 a3,3 0 0 0 6,0 v-20 l-5,-6" />
+    <!-- nozzle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M70,34 l8,6 l-3,4 l-8,-6 z" />
+</vector>

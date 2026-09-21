@@ -109,7 +109,7 @@ async function requestPasswordReset(email, { now = new Date() } = {}) {
   if (!address) return { outcome: "no_email" };
 
   // Same lookup as login, so a reset reaches exactly the account that signs in with this address.
-  const user = await User.findOne(require("../../utils/email").emailLookup(address)).select("_id name email").lean();
+  const user = await require("../../utils/email").findUserByEmail(address, { project: "_id name email", lean: true });
   if (!user) return { outcome: "no_account" };
 
   const rawToken = crypto.randomBytes(32).toString("base64url");

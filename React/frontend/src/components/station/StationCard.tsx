@@ -21,6 +21,10 @@ export default function StationCard({ station: s, index = 0 }: Props) {
   const navigate = useNavigate();
   const [imageFailed, setImageFailed] = useState(false);
   const level = queueLevelOf(s.queueStatus);
+  // Every fuel it sells marked unavailable by the station = out of stock.
+  const sold = s.fuelTypes.map((f) => f.toLowerCase() as "petrol" | "diesel" | "cng");
+  const outOfStock = sold.length > 0 && !!s.fuelAvailability && sold.every((f) => s.fuelAvailability?.[f] === false);
+  const bookable = s.open && !outOfStock;
 
   const openDetail = () => navigate(`/stations/${s.id}`);
   const book = (e: React.MouseEvent) => {
@@ -31,7 +35,6 @@ export default function StationCard({ station: s, index = 0 }: Props) {
   return (
     <article
       className="cx-station"
-      style={{ animation: `slideUp .35s ease ${Math.min(index, 8) * 0.04}s both` }}
       onClick={openDetail}
       onKeyDown={(e) => {
         if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
@@ -40,7 +43,8 @@ export default function StationCard({ station: s, index = 0 }: Props) {
         }
       }}
       tabIndex={0}
-      aria-label={`${s.name}, ${s.open ? "open" : "closed"}`}
+      aria-label={`${s.name}, ${!s.open ? "closed" : outOfStock ? "out of stock" : "open"}`}
+      style={{ animation: `slideUp .35s ease ${Math.min(index, 8) * 0.04}s both`, ...(bookable ? {} : { filter: "grayscale(0.6)" }) }}
     >
       <div className={`cx-thumb ${s.open ? "" : "is-closed"}`}>
         <i className="fas fa-gas-pump" aria-hidden />
@@ -60,8 +64,8 @@ export default function StationCard({ station: s, index = 0 }: Props) {
               <span className="truncate">{s.address}</span>
             </p>
           </div>
-          <span className={`cx-tag ${s.open ? "is-green" : "is-red"} flex-shrink-0`}>
-            {s.open ? "Open" : "Closed"}
+          <span className={`cx-tag ${bookable ? "is-green" : "is-red"} flex-shrink-0`}>
+            {!s.open ? "Closed" : outOfStock ? "Out of stock" : "Open"}
           </span>
         </div>
 
@@ -69,6 +73,7 @@ export default function StationCard({ station: s, index = 0 }: Props) {
           {s.distance != null && (
             <span>
               <i className="fas fa-route" aria-hidden /> {s.distance} km
+              {(s.distanceType === "road" || s.distanceType === "fixed") && <span className="text-[var(--muted)]"> by road</span>}
             </span>
           )}
           <span className={`queue-pill ${level}`} title={queueLabelOf(s.queueStatus)}>
@@ -79,12 +84,16 @@ export default function StationCard({ station: s, index = 0 }: Props) {
 
         <div className="flex items-end justify-between gap-3 mt-3 flex-wrap">
           <div className="cx-price-row">
-            {s.fuelTypes.slice(0, 3).map((f) => (
-              <span className="cx-price" key={f}>
-                {f}
-                <b>₹{s.uiPrices[f as keyof typeof s.uiPrices] ?? "—"}</b>
-              </span>
-            ))}
+            {s.fuelTypes.slice(0, 3).map((f) => {
+              const unavailable = s.fuelAvailability?.[f.toLowerCase() as "petrol" | "diesel" | "cng"] === false;
+              const price = s.uiPrices[f as keyof typeof s.uiPrices];
+              return (
+                <span className="cx-price" key={f} style={unavailable ? { opacity: 0.5 } : undefined}>
+                  {f}
+                  <b>{unavailable ? "Out of stock" : price != null ? `₹${price.toFixed(2)}/L` : "—"}</b>
+                </span>
+              );
+            })}
           </div>
           <div className="flex gap-2 ml-auto">
             <button
@@ -97,9 +106,23 @@ export default function StationCard({ station: s, index = 0 }: Props) {
             >
               Details
             </button>
-            <button type="button" className="btn btn-primary btn-sm" disabled={!s.open} onClick={book}>
-              <i className="fas fa-bolt" aria-hidden /> Book Now
-            </button>
+            {bookable ? (
+              <button type="button" className="btn btn-primary btn-sm" onClick={book}>
+                <i className="fas fa-bolt" aria-hidden /> Book Now
+              </button>
+            ) : (
+              // Not a dead button: send them to the nearest station that can serve them.
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate("/nearest-pump");
+                }}
+              >
+                <i className="fas fa-location-arrow" aria-hidden /> Try nearby
+              </button>
+            )}
           </div>
         </div>
       </div>

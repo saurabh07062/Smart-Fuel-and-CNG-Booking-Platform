@@ -32,6 +32,8 @@ interface VendorMgmtState {
   detailLoading: boolean;
 
   load: () => Promise<void>;
+  /** Refetch after a live event without the loading state; a failure keeps what is shown. */
+  refreshLive: () => Promise<void>;
   setTab: (tab: VmTab) => void;
   setFilter: (filter: VmFilter) => void;
   setSearch: (search: string) => void;
@@ -60,6 +62,15 @@ export const useVendorMgmtStore = create<VendorMgmtState>((set) => ({
   listView: "grid",
   selectedVendor: null,
   detailLoading: false,
+
+  refreshLive: async () => {
+    try {
+      const [stats, vendors] = await Promise.all([api.fetchVendorMgmtStats(), api.fetchManagedVendors()]);
+      set({ stats, vendors });
+    } catch {
+      /* keep what is on screen; the next event retries */
+    }
+  },
 
   load: async () => {
     set({ loading: true, error: null });

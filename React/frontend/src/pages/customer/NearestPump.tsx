@@ -27,7 +27,11 @@ export default function NearestPump() {
     setChecked(true);
   }, [result, hydrateResult]);
 
-  const stations = result?.stations ?? [];
+  // Nearest first, by the distance the server measured (0 km, 1 km, ...).
+  // A station without a known distance goes last.
+  const stations = [...(result?.stations ?? [])].sort(
+    (a, b) => (Number.isFinite(a.distance) ? a.distance : Infinity) - (Number.isFinite(b.distance) ? b.distance : Infinity),
+  );
 
   // `checked` keeps the "No recent search" card from flashing for one frame
   // before localStorage has been consulted.
@@ -69,13 +73,13 @@ export default function NearestPump() {
         <div className="cx-page-head">
           <div className="min-w-0">
             <h1 className="cx-title">Nearest {fuelLabel} stations</h1>
-            <p className="cx-subtitle">Stations you can book come first, ranked on distance, queue wait and price together.</p>
+            <p className="cx-subtitle">Sorted by distance from your location, nearest first.</p>
           </div>
           <span className="cx-live">Live availability</span>
         </div>
 
         <p className="cx-eyebrow mb-2 flex items-center gap-1.5">
-          <i className="fas fa-star" style={{ color: "var(--accent)" }} aria-hidden /> Best match for you
+          <i className="fas fa-location-dot" style={{ color: "var(--accent)" }} aria-hidden /> Nearest to you
         </p>
         <PumpCard station={nearest} fuelType={fuelType} isPrimary />
 

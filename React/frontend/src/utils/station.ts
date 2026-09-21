@@ -1,5 +1,6 @@
 import type { Booking, Coordinates, Station, UiStation } from "@/types";
 import { geoJsonToLatLng, isValidCoordinate } from "./geo";
+import { uploadUrl } from "@/services/api/apiClient";
 
 /**
  * Port of mapBackendStation() in frontend/js/app.js.
@@ -47,7 +48,12 @@ export function mapBackendStation(s: (Station & Record<string, unknown>) | null 
     coordinates: coords,
     hours: (raw.openingHours as string) || (raw.hours as string) || "24 Hours",
     open: s.status !== "Inactive" && raw.open !== false,
-    image: images.length > 0 ? images[0] : null,
+    // The station's own photo; without one, the pump photo its owner uploaded
+    // (petrol, else CNG), so every station with any photo shows it.
+    image:
+      (images.length > 0 ? images[0] : null) ??
+      uploadUrl(s.pumpImages?.petrol ?? null) ??
+      uploadUrl(s.pumpImages?.cng ?? null),
     queue: queueVal,
     queueLength: queueVal,
     waitTime: waitVal,

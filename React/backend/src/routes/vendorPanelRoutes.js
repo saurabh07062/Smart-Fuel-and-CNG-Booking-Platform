@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const vendorPanelController = require("../controllers/vendorPanelController");
-const { uploadImage, uploadImages } = require("../middleware/upload");
+const { uploadImage, uploadImages, uploadFields } = require("../middleware/upload");
 const vendorAuth = require("../middleware/vendor");
 
 // ============================================================
@@ -28,8 +28,23 @@ router.put(
   uploadImages("stations", "stationImages", 5),
   vendorPanelController.updateStation,
 );
+// Petrol and CNG pump photos (Station.pumpImages). Multer fields "petrolImage"
+// and "cngImage", one file each, same image rules as every station upload.
+router.put(
+  "/stations/:id/pump-images",
+  vendorAuth,
+  uploadFields("stations", [
+    { name: "petrolImage", maxCount: 1 },
+    { name: "cngImage", maxCount: 1 },
+  ]),
+  vendorPanelController.updatePumpImages,
+);
 router.delete("/stations/:id", vendorAuth, vendorPanelController.deleteStation);
 router.patch("/stations/:id/toggle-status", vendorAuth, vendorPanelController.toggleStationStatus);
+// Nozzles per fuel and how many take app bookings (config/nozzleModes.js).
+router.patch("/stations/:id/nozzles", vendorAuth, vendorPanelController.updateNozzleConfig);
+// Opening hours per day (24 hours / open-close / closed); the booking slots follow them.
+router.patch("/stations/:id/schedule", vendorAuth, vendorPanelController.updateSchedule);
 
 // ============================================================
 // FUEL PRICE MANAGEMENT
@@ -106,6 +121,13 @@ router.put(
   vendorAuth,
   uploadImage("vendors", "vendorImage"),
   vendorPanelController.updateProfile,
+);
+// Signature printed on invoices. Multer field: "signatureImage".
+router.put(
+  "/profile/signature",
+  vendorAuth,
+  uploadImage("vendors", "signatureImage"),
+  vendorPanelController.updateSignature,
 );
 
 module.exports = router;

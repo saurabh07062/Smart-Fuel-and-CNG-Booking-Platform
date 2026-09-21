@@ -153,7 +153,7 @@ test("nozzle lock against MongoDB", async (t) => {
       assert.equal(await transitionBooking({ bookingId: waiting._id, to: "serving" }), null);
       await assert.rejects(
         Booking.updateOne({ _id: waiting._id }, { $set: { status: "serving" } }),
-        (err) => err.code === 11000 && /uniq_serving_per_station/.test(err.message),
+        (err) => err.code === 11000 && /uniq_serving_per_resource/.test(err.message),
       );
       assert.equal(await servingCount(), 1);
     });
@@ -195,7 +195,9 @@ test("nozzle lock against MongoDB", async (t) => {
       assert.equal(r.statusCode, 200, JSON.stringify(r.body));
       assert.equal(r.body.queued, true);
       assert.match(r.body.msg, /nozzle is busy/);
-      assert.equal((await reload(scanned)).paymentStatus, "paid", "pay-at-station is collected at the scan");
+      // Check-in does not record the payment: the attendant records how it was
+      // paid (cash or UPI) through Collect payment.
+      assert.equal((await reload(scanned)).paymentStatus, "due_at_station", "still owed after the scan");
 
       const started = await book(6);
       const vr = res();

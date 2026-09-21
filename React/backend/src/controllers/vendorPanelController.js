@@ -27,6 +27,21 @@ function parseMaybeJson(value, fallback) {
   }
 }
 
+/**
+ * Why a {lat, lng} the vendor sent is unusable, or null. Nothing sent (both
+ * empty) is not a problem here -- callers decide whether a position is needed.
+ */
+function coordinateProblem(coordinates) {
+  const given = (v) => v !== undefined && v !== null && v !== "";
+  if (!coordinates || (!given(coordinates.lat) && !given(coordinates.lng))) return null;
+  if (!given(coordinates.lat) || !given(coordinates.lng)) return "Enter both latitude and longitude.";
+  const la = Number(coordinates.lat);
+  const ln = Number(coordinates.lng);
+  if (!Number.isFinite(la) || la < -90 || la > 90) return "Latitude must be a number between -90 and 90.";
+  if (!Number.isFinite(ln) || ln < -180 || ln > 180) return "Longitude must be a number between -180 and 180.";
+  return null;
+}
+
 function asArray(value) {
   if (value === undefined || value === null || value === "") return undefined;
   if (Array.isArray(value)) return value;
@@ -253,7 +268,48 @@ exports.createStation = async (req, res) => {
         .json({ msg: "Station name and address are required" });
     }
 
+    // Coordinates the vendor typed must be real numbers in range. Refused with
+    // a reason rather than silently dropped, so a mistyped position cannot
+    // create a station that nearest-station search never finds. Absent
+    // coordinates (and the legacy 0,0 "no pin") still create an unpinned station.
+    const coordProblem = coordinateProblem(coordinates);
+    if (coordProblem) {
+      uploaded.forEach(removeUploadedFile);
+      return res.status(400).json({ msg: coordProblem, field: "coordinates" });
+    }
+
     tankCapacity = parseMaybeJson(tankCapacity, tankCapacity);
+
+    // A station sells only fuels its vendor registered for. Nothing asked for
+    // means all of them; asking for another fuel is refused, not ignored.
+    // Admins creating on a vendor's behalf are not limited.
+    const vendorFuels = require("../services/vendor/vendorFuels");
+    if (req.user?.role !== "admin") {
+      const owner = await User.findById(req.user.id).select("vendorFuelTypes").lean();
+      const allowed = vendorFuels.vendorFuelsOf(owner);
+      const asked = fuelTypes === undefined ? allowed : vendorFuels.parseFuelList(fuelTypes);
+      const outside = asked.filter((f) => !allowed.includes(f));
+      if (outside.length) {
+        uploaded.forEach(removeUploadedFile);
+        return res.status(400).json({
+          msg: `Your vendor account sells ${vendorFuels.labelsOf(allowed).join(", ")}. ${vendorFuels.labelsOf(outside).join(", ")} cannot be added to this station.`,
+          field: "fuelTypes",
+        });
+      }
+      if (asked.length === 0) {
+        uploaded.forEach(removeUploadedFile);
+        return res.status(400).json({ msg: vendorFuels.REQUIRED_MSG, field: "fuelTypes" });
+      }
+      fuelTypes = vendorFuels.labelsOf(asked);
+      // No price, stock or tank size for a fuel this station does not sell.
+      const onlySold = (src) =>
+        src && typeof src === "object"
+          ? Object.fromEntries(Object.entries(src).filter(([k]) => asked.includes(normaliseFuel(k))))
+          : src;
+      prices = onlySold(prices);
+      inventory = onlySold(inventory);
+      tankCapacity = onlySold(tankCapacity);
+    }
 
     // Only what the vendor supplied. A missing price stays null (that fuel
     // cannot be booked until priced), missing stock is 0 and a missing
@@ -336,7 +392,25 @@ exports.updateStation = async (req, res) => {
       "acceptsUpi",
     ];
 
-    const updates = req.body || {};
+    const updates = { ...(req.body || {}) };
+
+    // Optimistic check: a form opened before someone else changed this station
+    // (another tab, an admin, a location fix) must not overwrite the newer
+    // values -- that is how a corrected location got replaced by a stale one.
+    const expectedUpdatedAt = updates.expectedUpdatedAt;
+    delete updates.expectedUpdatedAt;
+    if (expectedUpdatedAt) {
+      const expected = new Date(expectedUpdatedAt).getTime();
+      const current = station.updatedAt ? new Date(station.updatedAt).getTime() : NaN;
+      if (Number.isFinite(expected) && Number.isFinite(current) && expected !== current) {
+        uploaded.forEach(removeUploadedFile);
+        return res.status(409).json({
+          msg: "This station was changed after you opened the form. Close it and open Edit Station again to see the latest details.",
+          reason: "STALE_EDIT",
+        });
+      }
+    }
+
     const rejected = Object.keys(updates).filter((k) => !EDITABLE.includes(k));
 
     // Multipart sends these as strings; JSON callers are unaffected.
@@ -345,6 +419,44 @@ exports.updateStation = async (req, res) => {
     if (updates.fuelTypes !== undefined) updates.fuelTypes = asArray(updates.fuelTypes) ?? updates.fuelTypes;
     if (updates.amenities !== undefined) updates.amenities = asArray(updates.amenities) ?? updates.amenities;
     if (updates.images !== undefined) updates.images = asArray(updates.images) ?? updates.images;
+
+    // The same rules as creating a station, so an edit cannot store what a new
+    // station would refuse.
+    const refuse = (msg, field) => {
+      uploaded.forEach(removeUploadedFile);
+      return res.status(400).json({ msg, field });
+    };
+    for (const key of ["name", "address"]) {
+      if (updates[key] !== undefined) {
+        updates[key] = String(updates[key]).trim();
+        if (!updates[key]) return refuse(`Station ${key} cannot be empty.`, key);
+      }
+    }
+    if (updates.coordinates !== undefined) {
+      const coordProblem = coordinateProblem(updates.coordinates);
+      if (coordProblem) return refuse(coordProblem, "coordinates");
+      const la = Number(updates.coordinates?.lat);
+      const ln = Number(updates.coordinates?.lng);
+      if (!Station.isRealPosition(la, ln)) return refuse("Pin the station's real location.", "coordinates");
+      updates.coordinates = { lat: la, lng: ln };
+      // The GeoJSON location follows the new pin (Station pre-save syncLocation).
+      station.location = undefined;
+    }
+    if (updates.fuelTypes !== undefined && req.user?.role !== "admin") {
+      const vendorFuels = require("../services/vendor/vendorFuels");
+      const owner = await User.findById(station.owner).select("vendorFuelTypes").lean();
+      const allowed = vendorFuels.vendorFuelsOf(owner);
+      const asked = vendorFuels.parseFuelList(updates.fuelTypes);
+      const outside = asked.filter((f) => !allowed.includes(f));
+      if (outside.length) {
+        return refuse(
+          `Your vendor account sells ${vendorFuels.labelsOf(allowed).join(", ")}. ${vendorFuels.labelsOf(outside).join(", ")} cannot be added to this station.`,
+          "fuelTypes",
+        );
+      }
+      if (asked.length === 0) return refuse(vendorFuels.REQUIRED_MSG, "fuelTypes");
+      updates.fuelTypes = vendorFuels.labelsOf(asked);
+    }
 
     // New uploads replace the set. Held until after the save so a failure
     // leaves the station pointing at pictures that still exist.
@@ -383,27 +495,77 @@ exports.updateStation = async (req, res) => {
   }
 };
 
+/** Multipart field -> key under Station.pumpImages. */
+const PUMP_IMAGE_FIELDS = { petrolImage: "petrol", cngImage: "cng" };
+
+/** The pump photos this request uploaded, as { petrol?, cng? } public paths. */
+function uploadedPumpImages(req) {
+  const out = {};
+  for (const [field, key] of Object.entries(PUMP_IMAGE_FIELDS)) {
+    const stored = storedPath(req.files?.[field]?.[0], "stations");
+    if (stored) out[key] = stored;
+  }
+  return out;
+}
+
+/**
+ * PUT /api/vendor-panel/stations/:id/pump-images
+ * multipart: petrolImage and/or cngImage (JPG, PNG or WEBP, 5MB each -- checked
+ * by middleware/upload.js before this runs).
+ *
+ * Adds or replaces either photo; a photo not sent is left as it is. Only the
+ * station's owner (or an admin) gets past findOwnedStation, and anyone else's
+ * upload is deleted again. The replaced file is removed only after the new
+ * path is saved, so a failure never leaves the station pointing at nothing.
+ */
+exports.updatePumpImages = async (req, res) => {
+  const uploaded = uploadedPumpImages(req);
+  const discard = () => Object.values(uploaded).forEach(removeUploadedFile);
+  try {
+    const station = await findOwnedStation(req.params.id, req);
+    if (!station) {
+      discard();
+      return res.status(404).json({ msg: "Station not found" });
+    }
+    if (Object.keys(uploaded).length === 0) {
+      return res.status(400).json({ msg: "Choose a Petrol Pump Image or a CNG Pump Image to upload." });
+    }
+
+    const previous = { petrol: station.pumpImages?.petrol || null, cng: station.pumpImages?.cng || null };
+    const $set = {};
+    for (const [key, value] of Object.entries(uploaded)) $set[`pumpImages.${key}`] = value;
+
+    const saved = await Station.findOneAndUpdate({ _id: station._id }, { $set }, { returnDocument: "after" });
+    if (!saved) {
+      discard();
+      return res.status(404).json({ msg: "Station not found" });
+    }
+
+    for (const key of Object.keys(uploaded)) {
+      if (previous[key] && previous[key] !== saved.pumpImages?.[key]) removeUploadedFile(previous[key]);
+    }
+
+    emitStationEvent(req, "station_updated", saved);
+    res.json({ msg: "Pump images updated", pumpImages: saved.pumpImages, station: saved });
+  } catch (err) {
+    discard();
+    console.error("[vendorPanel] pump image update failed:", err.message);
+    res.status(500).json({ msg: "Server error updating pump images" });
+  }
+};
+
 exports.deleteStation = async (req, res) => {
   try {
     const owned = await findOwnedStation(req.params.id, req);
     if (!owned)
       return res.status(404).json({ msg: "Station not found" });
 
-    const station = await Station.findByIdAndDelete(req.params.id);
-    const stationId = req.params.id;
+    // The station and everything that belongs to it -- bookings, stock and
+    // price history, staff, walk-ins, notifications, photos -- and the live
+    // "deleted" event (services/station/stationRemoval.js).
+    const result = await require("../services/station/stationRemoval").removeStations([owned._id]);
 
-    // The row is gone; its pictures would otherwise stay on disk forever.
-    if (owned && Array.isArray(owned.images)) owned.images.forEach(removeUploadedFile);
-
-    // Also delete related data
-    await Booking.deleteMany({ station: req.params.id });
-    await PriceHistory.deleteMany({ station: req.params.id });
-    await Employee.deleteMany({ station: req.params.id });
-
-    // Real-time: notify customers of station removal
-    emitStationEvent(req, "station_deleted", { id: stationId });
-
-    res.json({ msg: "Station removed successfully" });
+    res.json({ msg: "Station removed successfully", ...result });
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error deleting station" });
@@ -430,6 +592,115 @@ exports.toggleStationStatus = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error toggling station status" });
+  }
+};
+
+/**
+ * PATCH /api/vendor-panel/stations/:id/nozzles
+ * Body: { petrol?: { total: 4, online: 1 }, diesel?: ..., cng?: ... }
+ * How many nozzles each fuel has, and whether one of them takes app bookings
+ * (online 0 or 1); the rest serve walk-ins (config/nozzleModes.js). Only fuels
+ * the station sells. Bookings already made are kept.
+ */
+exports.updateNozzleConfig = async (req, res) => {
+  try {
+    const { parseNozzleConfig } = require("../config/nozzleModes");
+    const { normaliseFuel, fuelLabel } = require("../config/fuels");
+    const station = await findOwnedStation(req.params.id, req);
+    if (!station) return res.status(404).json({ msg: "Station not found" });
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const sold = new Set((station.fuelTypes || []).map((f) => normaliseFuel(f)).filter(Boolean));
+    const set = {};
+    for (const [key, value] of Object.entries(body)) {
+      const fuel = normaliseFuel(key);
+      if (!fuel) return res.status(400).json({ msg: `Unknown fuel "${key}"` });
+      if (!sold.has(fuel)) return res.status(400).json({ msg: `This station does not sell ${fuelLabel(fuel)}` });
+      const parsed = parseNozzleConfig(value, fuelLabel(fuel));
+      if (!parsed.ok) return res.status(400).json({ msg: parsed.msg });
+      set[`nozzleConfig.${fuel}`] = parsed.value;
+      // The wait-time model's nozzle count follows the vendor's total.
+      set[`pumpCounts.${fuel}`] = parsed.value.total;
+    }
+    if (!Object.keys(set).length) return res.status(400).json({ msg: "Nothing to change" });
+
+    const updated = await Station.findByIdAndUpdate(station._id, { $set: set }, { new: true, runValidators: true });
+    emitStationEvent(req, "station_updated", updated);
+    // Walk-ins waiting may now have free walk-in nozzles.
+    await require("../services/queue/serviceTimer").releaseNozzle(String(updated._id));
+    res.json({ msg: "Nozzle setup saved", nozzleConfig: updated.nozzleConfig, station: updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Server error saving the nozzle setup" });
+  }
+};
+
+const SCHEDULE_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** One day's hours from the request, or an error message. */
+function parseScheduleDay(day, value) {
+  if (!value || typeof value !== "object") return { msg: `Missing hours for ${day}` };
+  const isClosed = value.isClosed === true;
+  const is24h = !isClosed && value.is24h === true;
+  const open = String(value.open ?? "06:00");
+  const close = String(value.close ?? "22:00");
+  if (!HHMM.test(open) || !HHMM.test(close)) return { msg: `${day}: times must be HH:MM (24-hour)` };
+  if (!isClosed && !is24h && open >= close) return { msg: `${day}: closing time must be after opening time` };
+  return { value: { open, close, is24h, isClosed } };
+}
+
+/** "24 Hours", "06:00 - 22:00" or "Varies by day" -- the short label shown on station cards. */
+function scheduleSummary(schedule) {
+  const text = (d) => (d.isClosed ? "Closed" : d.is24h ? "24 Hours" : `${d.open} - ${d.close}`);
+  const all = SCHEDULE_DAYS.map((day) => text(schedule[day]));
+  return all.every((t) => t === all[0]) ? all[0] : "Varies by day";
+}
+
+/**
+ * PATCH /api/vendor-panel/stations/:id/schedule
+ * Body: { monday: { is24h, open, close, isClosed }, ... } -- all seven days.
+ *
+ * The customer booking slots follow these hours (Station.scheduleAllowsSlot).
+ * Bookings already made are kept; the answer counts the upcoming ones that
+ * now fall outside the hours, so the vendor can contact or cancel them.
+ */
+exports.updateSchedule = async (req, res) => {
+  try {
+    const station = await findOwnedStation(req.params.id, req);
+    if (!station) return res.status(404).json({ msg: "Station not found" });
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const schedule = {};
+    for (const day of SCHEDULE_DAYS) {
+      const parsed = parseScheduleDay(day, body[day]);
+      if (parsed.msg) return res.status(400).json({ msg: parsed.msg });
+      schedule[day] = parsed.value;
+    }
+
+    const updated = await Station.findByIdAndUpdate(
+      station._id,
+      { $set: { operatingSchedule: schedule, openingHours: scheduleSummary(schedule) } },
+      { new: true, runValidators: true },
+    );
+    emitStationEvent(req, "station_updated", updated);
+
+    const { dateKey } = require("../config/businessTime");
+    const upcoming = await Booking.find({ station: station._id, status: "upcoming", bookingDate: { $gte: dateKey() } })
+      .select("bookingDate timeSlot")
+      .lean();
+    const outsideHours = upcoming.filter((b) => !Station.scheduleAllowsSlot(updated, b.bookingDate, b.timeSlot)).length;
+
+    res.json({
+      msg: "Slot timings saved",
+      operatingSchedule: updated.operatingSchedule,
+      openingHours: updated.openingHours,
+      outsideHours,
+      station: updated,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Server error saving the slot timings" });
   }
 };
 
@@ -679,6 +950,16 @@ exports.getStationBookings = async (req, res) => {
 exports.updateBookingStatus = async (req, res) => {
   try {
     const { status } = req.body;
+    // Completing with collectPayment records the payment too: the method is
+    // required, as on "Collect payment", and checked before anything changes.
+    const collectNow = status === "completed" && req.body?.collectPayment === true;
+    const collectMethod = typeof req.body?.method === "string" ? req.body.method.trim().toLowerCase() : "";
+    if (collectNow && !["cash", "upi"].includes(collectMethod)) {
+      return res.status(400).json({
+        reason: collectMethod ? "METHOD_INVALID" : "METHOD_REQUIRED",
+        msg: "Choose how the payment was collected: Cash or Online (UPI).",
+      });
+    }
     const station = await findOwnedStation(req.params.stationId, req);
     if (!station)
       return res.status(404).json({ msg: "Station not found" });
@@ -726,11 +1007,12 @@ exports.updateBookingStatus = async (req, res) => {
       if (!booking) {
         return res.status(409).json({ msg: "Booking was already completed or changed. Refresh and try again." });
       }
-      if (req.body?.collectPayment === true && booking.payMethod === "station" && booking.paymentStatus === "due_at_station") {
+      if (collectNow && booking.payMethod === "station" && booking.paymentStatus === "due_at_station") {
         const collected = await recordStationCollection({
           bookingId: booking._id,
           stationId: req.params.stationId,
           collectedBy: req.user.id,
+          method: collectMethod,
         });
         if (collected.booking) booking = collected.booking;
       }
@@ -851,10 +1133,20 @@ exports.collectBookingPayment = async (req, res) => {
       return res.status(404).json({ msg: "Booking not found" });
     }
 
+    // How the customer paid at the pump: required, and only these two.
+    const method = typeof req.body?.method === "string" ? req.body.method.trim().toLowerCase() : "";
+    if (!method) {
+      return res.status(400).json({ reason: "METHOD_REQUIRED", msg: "Choose how the payment was collected: Cash or Online (UPI)." });
+    }
+    if (!["cash", "upi"].includes(method)) {
+      return res.status(400).json({ reason: "METHOD_INVALID", msg: "Payment method must be Cash or Online (UPI)." });
+    }
+
     const result = await recordStationCollection({
       bookingId: req.params.bookingId,
       stationId: station._id,
       collectedBy: req.user.id,
+      method,
     });
 
     if (result.outcome === "not_found") return res.status(404).json({ msg: "Booking not found" });
@@ -875,7 +1167,11 @@ exports.collectBookingPayment = async (req, res) => {
     } catch (e) {
       console.error("Socket emit error:", e);
     }
-    res.json({ msg: `Payment of ₹${result.booking.amount} recorded.`, booking: result.booking, alreadyPaid: false });
+    res.json({
+      msg: `Payment of ₹${result.booking.amount} recorded (${method === "cash" ? "Cash" : "Online (UPI)"}).`,
+      booking: result.booking,
+      alreadyPaid: false,
+    });
   } catch (err) {
     console.error("[vendorPanel] collect payment failed:", err);
     res.status(500).json({ msg: "Server error recording the payment" });
@@ -993,9 +1289,13 @@ exports.updateInventory = async (req, res) => {
     // Real-time: notify customers of inventory change
     emitStationEvent(req, "station_updated", station);
 
-    realtime.stationChanged(realtime.EVENTS.INVENTORY_UPDATED, station, {
-      inventory: station.inventory,
-    });
+    // Stock levels are private (services/station/publicStation.js): the owner
+    // and admins only. stationChanged would have added `inventory` to the
+    // public copy every customer's browser receives; customers already got
+    // the public station:updated above.
+    const stockPayload = { ...station.toObject(), inventory: station.inventory };
+    realtime.toVendor(station.owner, realtime.EVENTS.INVENTORY_UPDATED, stockPayload);
+    realtime.toAdmins(realtime.EVENTS.INVENTORY_UPDATED, stockPayload);
 
     const status = classifyStationInventory(station);
     res.json({
@@ -1465,6 +1765,16 @@ exports.updateProfile = async (req, res) => {
   try {
     const { name, phone, businessName, gstNumber, vendorAddress, vendorDescription } =
       req.body;
+
+    // Changing the fuels sold (sent only by the profile form's fuel checkboxes).
+    let fuelUpdate;
+    if (req.body.vendorFuelTypes !== undefined) {
+      fuelUpdate = require("../services/vendor/vendorFuels").parseVendorFuels(req.body.vendorFuelTypes);
+      if (fuelUpdate.error) {
+        removeUploadedFile(uploaded);
+        return res.status(400).json({ msg: fuelUpdate.error, field: "vendorFuelTypes" });
+      }
+    }
     const user = await User.findById(req.user.id);
     if (!user) {
       removeUploadedFile(uploaded);
@@ -1477,6 +1787,7 @@ exports.updateProfile = async (req, res) => {
     if (gstNumber) user.gstNumber = gstNumber;
     if (vendorAddress) user.vendorAddress = vendorAddress;
     if (vendorDescription) user.vendorDescription = vendorDescription;
+    if (fuelUpdate) user.vendorFuelTypes = fuelUpdate.fuels;
 
     // The vendor's photo shares the `profileImage` field with every other
     // account type -- a vendor is a User, and a second field would mean every
@@ -1495,5 +1806,26 @@ exports.updateProfile = async (req, res) => {
     removeUploadedFile(uploaded);
     console.error(err);
     res.status(500).json({ msg: "Server error updating profile" });
+  }
+};
+/**
+ * PUT /api/vendor-panel/profile/signature  (multer field "signatureImage")
+ * Stores the signature shown on invoices issued from now on. The previous
+ * file is kept: invoices already issued still point at it.
+ */
+exports.updateSignature = async (req, res) => {
+  const uploaded = storedPath(req.file, "vendors");
+  if (!uploaded) return res.status(400).json({ msg: "Choose a signature image (JPG, PNG or WEBP)." });
+  try {
+    const user = await User.findByIdAndUpdate(req.user.id, { $set: { signatureImage: uploaded } }, { new: true }).select("signatureImage");
+    if (!user) {
+      removeUploadedFile(uploaded);
+      return res.status(404).json({ msg: "Vendor not found" });
+    }
+    res.json({ msg: "Signature updated", signatureImage: user.signatureImage });
+  } catch (err) {
+    removeUploadedFile(uploaded);
+    console.error(err);
+    res.status(500).json({ msg: "Server error saving the signature" });
   }
 };

@@ -8,8 +8,6 @@ const { uploadImage } = require('../middleware/upload');
 // All customer endpoints require an authenticated JWT and the 'customer' role.
 router.get('/profile', auth, requireRole('customer'), customerController.profile);
 router.get('/bookings', auth, requireRole('customer'), customerController.bookings);
-router.get('/orders', auth, requireRole('customer'), customerController.orders);
-router.get('/favorites', auth, requireRole('customer'), customerController.favorites);
 router.get('/notifications', auth, requireRole('customer'), customerController.notifications);
 router.get('/dashboard', auth, requireRole('customer'), customerController.dashboard);
 

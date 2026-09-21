@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const log = require("../../utils/logger").child("email");
 
 /**
  * Centralized SMTP email service for FuelMart.
@@ -31,8 +32,7 @@ function initTransporter() {
   const mailPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
 
   if (!mailUser || !mailPass) {
-    console.warn("⚠️  SMTP credentials missing in .env — emails disabled");
-    console.warn("   Set SMTP_USER and SMTP_PASS in backend/.env to enable email features");
+    log.warn("SMTP not configured; email sending disabled", { hint: "set SMTP_USER and SMTP_PASS in backend/.env" });
     return null;
   }
 
@@ -47,12 +47,15 @@ function initTransporter() {
   // Verify connection on startup
   transporter.verify((error, success) => {
     if (error) {
-      console.error("❌ SMTP Connection Failed:", error.message);
-      console.error("   Fix: Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in backend/.env");
-      console.error("   For Gmail: use an App Password, not your regular password");
+      log.error("SMTP connection failed; email sending disabled", {
+        host,
+        port,
+        err: error,
+        hint: "check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (Gmail needs an App Password)",
+      });
       transporter = null; // disable broken transporter
     } else {
-      console.log(`✅ SMTP Server connected successfully (${host}:${port}) — emails will work!`);
+      log.info("SMTP connected", { host, port, secure });
     }
   });
 
@@ -78,7 +81,7 @@ function getFromAddress() {
 async function sendMail({ to, subject, html, text }) {
   const tp = getTransporter();
   if (!tp) {
-    console.warn("[Email] ⚠️ SMTP transporter not available — email not sent");
+    log.warn("Email not sent: SMTP unavailable", { subject });
     return false;
   }
 
@@ -90,10 +93,11 @@ async function sendMail({ to, subject, html, text }) {
       html,
       text,
     });
-    console.log(`[Email] ✅ Sent to ${to} — ${info.messageId}`);
+    // The recipient is masked by the logger (sa***@gmail.com).
+    log.info("Email sent", { to, subject, messageId: info.messageId });
     return true;
   } catch (err) {
-    console.error(`[Email] ❌ Failed to send to ${to}:`, err.message);
+    log.error("Email send failed", { to, subject, err });
     return false;
   }
 }

@@ -6,12 +6,16 @@
  * duration from here -- nowhere else in the codebase may hardcode a service
  * time.
  *
- * A fill's time depends on how much is dispensed:
+ * A fill's time depends on how much is dispensed, kept inside its fuel's
+ * allowed range:
  *
- *   seconds = setup + secondsPerUnit x quantity      (rounded to whole seconds)
+ *   seconds = clamp(setup + secondsPerUnit x quantity, min, max)   (whole seconds)
  *
- *   Petrol / Diesel   6 s + 3.4 s per litre   10 L -> 40 s, 5 L -> 23 s
- *   CNG              60 s + 12 s per kg       20 kg -> 300 s
+ *   Petrol / Diesel   fixed 40 seconds    any quantity -> 40 s
+ *   CNG               fixed 5 minutes     any quantity -> 300 s
+ *
+ *   FUEL_MIN_SECONDS_PETROL=40  FUEL_MAX_SECONDS_PETROL=40   (same for DIESEL)
+ *   FUEL_MIN_SECONDS_CNG=300    FUEL_MAX_SECONDS_CNG=300
  *
  * The booked quantity is stored on the booking with the duration it produced
  * (Booking.serviceDurationSeconds), so a later change to these rates never
@@ -69,6 +73,30 @@ const FUEL_SERVICE_RATES = Object.freeze(
   ),
 );
 
+const DEFAULT_LIMITS = {
+  petrol: { min: 40, max: 40 },
+  diesel: { min: 40, max: 40 },
+  cng: { min: 300, max: 300 },
+};
+
+/** The allowed duration range per fuel. A fill never runs shorter or longer. */
+const FUEL_SERVICE_LIMITS = Object.freeze(
+  Object.fromEntries(
+    FUEL_KEYS.map((fuel) => {
+      const up = fuel.toUpperCase();
+      const min = envNumber(`FUEL_MIN_SECONDS_${up}`, DEFAULT_LIMITS[fuel].min, { integer: true });
+      const max = envNumber(`FUEL_MAX_SECONDS_${up}`, DEFAULT_LIMITS[fuel].max, { integer: true });
+      if (min > max) throw new Error(`FUEL_MIN_SECONDS_${up} (${min}) must not exceed FUEL_MAX_SECONDS_${up} (${max})`);
+      return [fuel, Object.freeze({ min, max })];
+    }),
+  ),
+);
+
+const clampFor = (fuel, seconds) => {
+  const { min, max } = FUEL_SERVICE_LIMITS[fuel];
+  return Math.min(max, Math.max(min, seconds));
+};
+
 /**
  * @param {string} fuelType any casing/spelling normaliseFuel accepts
  * @param {number} [quantity] litres (kg for CNG). Without one, the fuel's
@@ -81,14 +109,15 @@ function getServiceDurationSeconds(fuelType, quantity) {
   const fuel = FUEL_SERVICE_RATES[normaliseFuel(fuelType)] ? normaliseFuel(fuelType) : "petrol";
   const qty = Number(quantity);
   if (quantity === undefined || quantity === null || !Number.isFinite(qty) || qty <= 0) {
-    return FUEL_SERVICE_DURATIONS_SECONDS[fuel];
+    return clampFor(fuel, FUEL_SERVICE_DURATIONS_SECONDS[fuel]);
   }
   const { setupSeconds, secondsPerUnit } = FUEL_SERVICE_RATES[fuel];
-  return Math.max(1, Math.round(setupSeconds + secondsPerUnit * qty));
+  return clampFor(fuel, Math.max(1, Math.round(setupSeconds + secondsPerUnit * qty)));
 }
 
 module.exports = {
   FUEL_SERVICE_DURATIONS_SECONDS,
   FUEL_SERVICE_RATES,
+  FUEL_SERVICE_LIMITS,
   getServiceDurationSeconds,
 };

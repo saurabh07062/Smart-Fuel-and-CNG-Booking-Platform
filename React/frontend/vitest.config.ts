@@ -6,8 +6,8 @@ import viteConfig from "./vite.config";
  * build (vite.config.ts), rendered in jsdom. API modules are mocked in each
  * test: nothing here talks to a server or a database.
  */
-export default mergeConfig(
-  viteConfig,
+export default defineConfig((env) => mergeConfig(
+  viteConfig(env),
   defineConfig({
     test: {
       environment: "jsdom",
@@ -15,4 +15,4 @@ export default mergeConfig(
       include: ["src/**/*.test.{ts,tsx}"],
     },
   }),
-);
+));

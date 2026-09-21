@@ -13,11 +13,7 @@ function asBool(v) {
   if (typeof v === 'string') return v === 'true' || v === '1' || v === 'on';
   return Boolean(v);
 }
-let Order = null;
-let Favorite = null;
 let Notification = null;
-try { Order = require('../models/Order'); } catch (e) {}
-try { Favorite = require('../models/Favorite'); } catch (e) {}
 try { Notification = require('../models/Notification'); } catch (e) {}
 
 // One implementation of the expiry rule, shared with booking creation.
@@ -51,38 +47,13 @@ exports.bookings = async (req, res) => {
   }
 };
 
-exports.orders = async (req, res) => {
-  try {
-    const userId = req.user && (req.user.userId || req.user.id);
-    if (!userId) return res.status(401).json({ msg: 'Unauthenticated' });
-    if (!Order) return res.json([]);
-    const orders = await Order.find({ customerId: userId }).sort({ createdAt: -1 });
-    res.json(orders);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: 'Server error' });
-  }
-};
-
-exports.favorites = async (req, res) => {
-  try {
-    const userId = req.user && (req.user.userId || req.user.id);
-    if (!userId) return res.status(401).json({ msg: 'Unauthenticated' });
-    if (!Favorite) return res.json([]);
-    const favs = await Favorite.find({ user: userId }).sort({ createdAt: -1 });
-    res.json(favs);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: 'Server error' });
-  }
-};
-
 exports.notifications = async (req, res) => {
   try {
     const userId = req.user && (req.user.userId || req.user.id);
     if (!userId) return res.status(401).json({ msg: 'Unauthenticated' });
     if (!Notification) return res.json([]);
-    const notes = await Notification.find({ user: userId }).sort({ createdAt: -1 });
+    // The latest 200: the list grows forever, and older ones are never shown.
+    const notes = await Notification.find({ user: userId }).sort({ createdAt: -1 }).limit(200).lean();
     res.json(notes);
   } catch (err) {
     console.error(err);

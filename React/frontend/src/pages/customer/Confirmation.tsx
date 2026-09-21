@@ -7,6 +7,8 @@ import EmptyState from "@/components/common/EmptyState";
 import RouteMap from "@/components/maps/RouteMap";
 import ServiceCountdown from "@/components/booking/ServiceCountdown";
 import BookingQrCard from "@/components/booking/BookingQrCard";
+import CancelBookingSheet from "@/components/booking/CancelBookingSheet";
+import BookingTimeline, { timelineStep } from "@/components/booking/BookingTimeline";
 import UpiPaymentCard from "@/components/booking/UpiPaymentCard";
 import { useBookingStore } from "@/store/bookingStore";
 import { useStationStore } from "@/store/stationStore";
@@ -17,9 +19,12 @@ import { toApiError } from "@/services/api/apiClient";
 import { formatCurrency, isSlotElapsed } from "@/utils/format";
 import { resolveBookingStation } from "@/utils/station";
 import { getVehicleIcon } from "@/utils/vehicle";
-import { getFreshUserCoords, haversineKm } from "@/utils/geo";
+import { getFreshUserCoords } from "@/utils/geo";
+import { fetchRouteDistance } from "@/services/api/stationApi";
+import { distanceNote } from "@/utils/distanceNote";
 import { istDateKey } from "@/utils/businessTime";
 import { paymentState } from "@/utils/payment";
+import { directionsUrl } from "@/utils/navigation";
 import { useWatchStation } from "@/hooks/useSocket";
 
 const ACTIVE_STATUSES = ["upcoming", "serving", "waitlisted"];
@@ -106,7 +111,8 @@ export default function Confirmation() {
 
   useEffect(() => {
     void loadBookings().finally(() => setBooted(true));
-    if (stations.length === 0) void loadStations();
+    // Always refetch; what is on screen stays until the fresh list arrives.
+    void loadStations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -118,7 +124,7 @@ export default function Confirmation() {
   useEffect(() => {
     let cancelled = false;
     void getFreshUserCoords().then((fix) => {
-      if (!cancelled && fix) setCoords(fix.lat, fix.lng);
+      if (!cancelled && fix) setCoords(fix.lat, fix.lng, "gps");
     });
     return () => {
       cancelled = true;
@@ -130,7 +136,9 @@ export default function Confirmation() {
     const active = bookings.filter(
       (b) => ACTIVE_STATUSES.includes(b.status) && !isSlotElapsed(b.bookingDate, b.timeSlot),
     );
-    return active[0] ?? bookings[0] ?? null;
+    // Only a live booking is shown here: a completed, cancelled or missed one
+    // has no pass to show (it stays in the booking history).
+    return active[0] ?? null;
   }, [bookings, id]);
 
   // This booking's station room carries its live queue and slot changes.
@@ -140,22 +148,62 @@ export default function Confirmation() {
       : null,
   );
 
+  // Road distance to this booking's station from where the customer is, as
+  // Google Maps measures the route (backend services/station/roadDistance.js).
+  const routeStationId = booking
+    ? String((typeof booking.station === "object" && booking.station ? booking.station._id : booking.station) ?? "")
+    : "";
+  const [route, setRoute] = useState<{ key: string; distanceKm: number; distanceType: "road" | "straight" | "fixed" } | null>(null);
+  const routeKey = routeStationId && userCoords ? `${routeStationId}@${userCoords.lat},${userCoords.lng}` : "";
+  useEffect(() => {
+    if (!routeKey || !userCoords) return;
+    let cancelled = false;
+    fetchRouteDistance(routeStationId, userCoords)
+      .then((r) => {
+        if (!cancelled) setRoute({ key: routeKey, distanceKm: r.distanceKm, distanceType: r.distanceType });
+      })
+      .catch(() => {
+        /* no distance shown rather than a wrong one */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- routeKey carries the station and coordinates
+  }, [routeKey]);
+
   const retryLocation = async () => {
     const fix = await getFreshUserCoords();
     if (fix) setCoords(fix.lat, fix.lng);
     else pushToast("Please allow location access to show the route.", "error");
   };
 
-  const onCancel = async (bookingId: string) => {
-    if (!window.confirm("Are you sure you want to cancel this booking?")) return;
+  // The booking whose cancel sheet is open (null = closed).
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const onCancel = (bookingId: string) => setCancelling(bookingId);
+  const confirmCancel = async (reason?: string) => {
+    if (!cancelling) return;
+    setCancelBusy(true);
     try {
-      await apiCancelBooking(bookingId);
-      pushToast("Booking cancelled successfully", "success");
+      await apiCancelBooking(cancelling, reason);
+      pushToast("Booking cancelled. Nothing was charged.", "success");
+      setCancelling(null);
       await loadBookings();
     } catch (err) {
       pushToast(toApiError(err).msg, "error");
+    } finally {
+      setCancelBusy(false);
     }
   };
+  const cancelSheet = (
+    <CancelBookingSheet
+      open={cancelling !== null}
+      waitlisted={bookings.find((x) => String(x._id) === cancelling)?.status === "waitlisted"}
+      busy={cancelBusy}
+      onClose={() => setCancelling(null)}
+      onConfirm={(reason) => void confirmCancel(reason)}
+    />
+  );
 
   if (!booted || (loading && bookings.length === 0)) {
     return (
@@ -241,6 +289,7 @@ export default function Confirmation() {
     badge: string,
     amountLabel: string,
     actionLabel: string,
+    invoice = false,
   ) => (
     <Layout>
       <div className="max-w-2xl mx-auto">
@@ -270,6 +319,16 @@ export default function Confirmation() {
             </div>
           </div>
           <div className="cx-panel-foot grid grid-cols-2 gap-3">
+            {invoice && (
+              <a
+                className="btn btn-primary btn-block col-span-2"
+                href={`/api/invoices/${bookingId}?print=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <i className="fas fa-file-invoice" aria-hidden /> Download Invoice
+              </a>
+            )}
             <button className="btn btn-primary btn-block" onClick={() => navigate("/stations")}>
               <i className="fas fa-gas-pump" aria-hidden /> {actionLabel}
             </button>
@@ -295,6 +354,20 @@ export default function Confirmation() {
     );
   }
 
+  // 2b. Missed: the slot ended without a check-in, so the booking was
+  // cancelled automatically (backend services/booking/bookingSweep.js).
+  if (b.status === "no_show" || b.status === "expired") {
+    return terminalView(
+      "bad",
+      "fa-clock",
+      "Booking Cancelled",
+      "You did not arrive at the station during your time slot, so this booking was cancelled automatically. Nothing was charged.",
+      "Cancelled",
+      "Amount",
+      "Book New Slot",
+    );
+  }
+
   // 3. Completed.
   if (b.status === "completed") {
     return terminalView(
@@ -307,6 +380,7 @@ export default function Confirmation() {
       "Completed",
       b.paymentStatus === "paid" ? "Amount Paid" : "Amount Due at Pump",
       "Book Fuel Again",
+      true,
     );
   }
 
@@ -348,6 +422,7 @@ export default function Confirmation() {
   if (b.status === "waitlisted") {
     return (
       <Layout>
+        {cancelSheet}
         <div className="max-w-2xl mx-auto">
           {pageHead(
             "warn",
@@ -404,19 +479,20 @@ export default function Confirmation() {
   let distKm: number | null = null;
   let driveTimeMin: number | null = null;
   let etaTime: string | null = null;
-  let gmapsUrl: string | null = null;
+  // Navigation needs only the station's saved position: Google Maps starts from
+  // the device's own GPS. It used to be built only when this app also knew the
+  // customer's location, so a customer who had not shared it could not navigate.
+  const gmapsUrl = st.hasValidCoords ? directionsUrl(st.lat, st.lng) : null;
 
-  if (hasValidRoute && userCoords && st.coordinates) {
-    distKm = parseFloat(haversineKm(userCoords, st.coordinates).toFixed(2));
+  const currentRoute = route && route.key === routeKey ? route : null;
+  if (hasValidRoute && currentRoute) {
+    distKm = currentRoute.distanceKm;
     // 25 km/h urban average -- the Vanilla figure, unchanged.
     driveTimeMin = Math.max(1, Math.round((distKm / 25) * 60));
     etaTime = new Date(Date.now() + driveTimeMin * 60000).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
-    // No origin= on purpose: Google Maps uses the device's own live GPS,
-    // which is more reliable than anything this app could pass along.
-    gmapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${st.lat},${st.lng}&travelmode=driving`;
   }
 
   const estDuration = b.serviceDurationSeconds
@@ -439,6 +515,14 @@ export default function Confirmation() {
     </div>
   );
 
+  // When to set off: the slot start, less the drive, less a 5-minute margin.
+  const LEAVE_BUFFER_MIN = 5;
+  const slotStart = b.bookingStartTime ? new Date(b.bookingStartTime) : null;
+  const leaveBy =
+    slotStart && driveTimeMin !== null ? new Date(slotStart.getTime() - (driveTimeMin + LEAVE_BUFFER_MIN) * 60000) : null;
+  const leaveByText = leaveBy ? leaveBy.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+  const leaveNow = !!leaveBy && leaveBy.getTime() <= Date.now();
+
   const liveQueue = stations.find((x) => x.id === st.stationId)?.queue ?? 0;
   const statusLabel = b.status.charAt(0).toUpperCase() + b.status.slice(1);
   // The server's live estimate of this booking's turn at the nozzle
@@ -448,6 +532,7 @@ export default function Confirmation() {
 
   return (
     <Layout>
+      {cancelSheet}
       {pageHead(
         "good",
         "fa-circle-check",
@@ -470,6 +555,7 @@ export default function Confirmation() {
               )}
             </div>
             <div className="cx-panel-body">
+              <BookingTimeline step={timelineStep(b, leaveNow)} />
               {turnMinutes !== null && (
                 <div className="cx-status-banner t-good mb-3" role="status" aria-live="polite">
                   <span className="cx-stat-icon">
@@ -498,16 +584,19 @@ export default function Confirmation() {
                 {metric(
                   "fa-route",
                   "Distance",
-                  hasValidRoute ? (
+                  hasValidRoute && distKm !== null ? (
                     <>
                       {distKm}
                       <small>km</small>
+                      {distanceNote(currentRoute) && (
+                        <span className="block text-[11px] text-[var(--muted)] font-normal">{distanceNote(currentRoute)}</span>
+                      )}
                     </>
                   ) : (
                     "—"
                   ),
                 )}
-                {metric("fa-clock", "Est. arrival", hasValidRoute ? etaTime : "—")}
+                {metric("fa-clock", "Est. arrival", hasValidRoute && etaTime ? etaTime : "—")}
                 {metric(
                   "fa-users",
                   "Live queue",
@@ -532,8 +621,12 @@ export default function Confirmation() {
                   <p className="text-[13px] font-semibold" style={{ color: "var(--text)" }}>
                     Your current location
                   </p>
-                  <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
-                    Depart now to reach before your slot begins
+                  <p className="text-xs mt-0.5" style={{ color: leaveNow ? "var(--danger)" : "var(--muted)" }}>
+                    {!leaveByText
+                      ? "Share your location to see when to leave"
+                      : leaveNow
+                        ? "Leave now to make your slot"
+                        : `Leave by ${leaveByText} · ~${driveTimeMin} min drive + ${LEAVE_BUFFER_MIN} min spare`}
                   </p>
                 </div>
                 <div className="relative">
@@ -590,6 +683,14 @@ export default function Confirmation() {
                   )}
                 </div>
               )}
+              {/* The route preview needs the customer's location; navigation does not. */}
+              {!(hasValidRoute && userCoords && st.coordinates) && gmapsUrl && (
+                <a href={gmapsUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-block mt-3">
+                  <i className="fas fa-location-arrow" aria-hidden />
+                  Start Google Maps Navigation
+                  <i className="fas fa-arrow-up-right-from-square text-xs opacity-75" aria-hidden />
+                </a>
+              )}
             </div>
           </section>
 
@@ -633,7 +734,14 @@ export default function Confirmation() {
           {/* Scan-to-pay, only for a booking that still owes money at the pump.
               The card decides for itself whether UPI is actually available and
               falls back to "pay the attendant" when it is not. */}
-          {b.paymentStatus !== "paid" && b.payMethod !== "online" && <UpiPaymentCard booking={b} />}
+          {b.paymentStatus !== "paid" && b.payMethod !== "online" && (
+            <details className="cx-panel">
+              <summary className="cx-panel-body cursor-pointer font-bold flex items-center gap-2">
+                <i className="fas fa-qrcode" aria-hidden /> Scan to pay at pump
+              </summary>
+              <UpiPaymentCard booking={b} />
+            </details>
+          )}
 
           <section className="cx-panel">
             <div className="cx-panel-body space-y-2">

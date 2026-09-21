@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuthBoot } from "@/hooks/useAuthBoot";
 import { useAuthStore } from "@/store/authStore";
@@ -5,32 +6,45 @@ import { authDestination } from "@/utils/authDestination";
 import ProtectedRoute from "./ProtectedRoute";
 import RoleRoute from "./RoleRoute";
 import Loader from "@/components/common/Loader";
+import { isCustomerAppPath } from "@/utils/nativeApp";
 
+/**
+ * The website (every page), or the customer app build (VITE_APP_MODE=customer,
+ * `npm run build:customer`): customer sign-in and booking only. In the customer
+ * build this is the constant false, so every vendor and admin page below is
+ * compiled out -- their code is not in the app at all.
+ */
+const WEBSITE = import.meta.env.VITE_APP_MODE !== "customer";
+const NoPage: React.ComponentType = () => null;
+
+// Pages load on demand (one chunk per page), so a customer never downloads
+// the vendor or admin consoles. The landing and login pages stay in the main
+// bundle: they are the first screen for most visits.
 // Public
-import Landing from "@/pages/public/Landing";
+const Landing = WEBSITE ? lazy(() => import("@/pages/public/Landing")) : NoPage;
 // Auth
 import Login from "@/pages/auth/Login";
-import Register from "@/pages/auth/Register";
-import VerifyEmail from "@/pages/auth/VerifyEmail";
-import ForgotPassword from "@/pages/auth/ForgotPassword";
-import ResetPassword from "@/pages/auth/ResetPassword";
+const Register = lazy(() => import("@/pages/auth/Register"));
+const VerifyEmail = lazy(() => import("@/pages/auth/VerifyEmail"));
+const ForgotPassword = lazy(() => import("@/pages/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/auth/ResetPassword"));
 // Customer
-import Dashboard from "@/pages/customer/Dashboard";
-import Stations from "@/pages/customer/Stations";
-import StationDetail from "@/pages/customer/StationDetail";
-import MyVehicles from "@/pages/customer/MyVehicles";
-import NearestPump from "@/pages/customer/NearestPump";
-import Booking from "@/pages/customer/Booking";
-import Confirmation from "@/pages/customer/Confirmation";
+const Dashboard = lazy(() => import("@/pages/customer/Dashboard"));
+const Stations = lazy(() => import("@/pages/customer/Stations"));
+const StationDetail = lazy(() => import("@/pages/customer/StationDetail"));
+const MyVehicles = lazy(() => import("@/pages/customer/MyVehicles"));
+const NearestPump = lazy(() => import("@/pages/customer/NearestPump"));
+const Booking = lazy(() => import("@/pages/customer/Booking"));
+const Confirmation = lazy(() => import("@/pages/customer/Confirmation"));
 // Vendor
-import VendorRegister from "@/pages/vendor/VendorRegister";
-import VendorSecretCode from "@/pages/vendor/VendorSecretCode";
-import VendorTrack from "@/pages/vendor/VendorTrack";
-import VendorPanel from "@/pages/vendor/VendorPanel";
+const VendorRegister = WEBSITE ? lazy(() => import("@/pages/vendor/VendorRegister")) : NoPage;
+const VendorSecretCode = WEBSITE ? lazy(() => import("@/pages/vendor/VendorSecretCode")) : NoPage;
+const VendorTrack = WEBSITE ? lazy(() => import("@/pages/vendor/VendorTrack")) : NoPage;
+const VendorPanel = WEBSITE ? lazy(() => import("@/pages/vendor/VendorPanel")) : NoPage;
 // Admin
-import AdminPanel from "@/pages/admin/AdminPanel";
-import VendorManagement from "@/pages/admin/VendorManagement";
-import SuperAdmin from "@/pages/admin/SuperAdmin";
+const AdminPanel = WEBSITE ? lazy(() => import("@/pages/admin/AdminPanel")) : NoPage;
+const VendorManagement = WEBSITE ? lazy(() => import("@/pages/admin/VendorManagement")) : NoPage;
+const SuperAdmin = WEBSITE ? lazy(() => import("@/pages/admin/SuperAdmin")) : NoPage;
 
 /**
  * "/" as the Vanilla app treated it: the email-verification link
@@ -43,7 +57,9 @@ function HomeRoute() {
   const user = useAuthStore((s) => s.user);
   const verify = new URLSearchParams(search).get("verify");
   if (verify) return <VerifyEmail token={verify} />;
-  return isAuthenticated ? <Navigate to={authDestination(user)} replace /> : <Landing />;
+  if (isAuthenticated) return <Navigate to={authDestination(user)} replace />;
+  // The customer app opens straight on sign-in; the landing page is for the website.
+  return WEBSITE ? <Landing /> : <Navigate to="/login" replace />;
 }
 
 /**
@@ -74,6 +90,8 @@ export default function AppRoutes() {
   }
 
   return (
+    <CustomerAppGate>
+    <Suspense fallback={<Loader full />}>
     <Routes>
       <Route
         path="/login"
@@ -82,10 +100,12 @@ export default function AppRoutes() {
       {/* The admin sign-in address: the same sign-in form (the role comes from
           the server), so admin logout and an expired admin session come back
           here rather than to the customer login. */}
+      {WEBSITE && (
       <Route
         path="/admin/login"
         element={isAuthenticated ? <Navigate to={authDestination(user)} replace /> : <Login />}
       />
+      )}
       <Route
         path="/register"
         element={isAuthenticated ? <Navigate to={authDestination(user)} replace /> : <Register />}
@@ -103,6 +123,8 @@ export default function AppRoutes() {
           Back onto it goes to their own home instead of a sign-in form. The
           one exception is a vendor who still has to redeem a code:
           authDestination sends them HERE, so redirecting would loop. */}
+      {WEBSITE && (
+        <>
       <Route
         path="/vendor/secret-code"
         element={
@@ -115,6 +137,8 @@ export default function AppRoutes() {
       />
       {/* Public: vendor onboarding (Vanilla #vendor-register). */}
       <Route path="/vendor-register" element={<VendorRegister />} />
+        </>
+      )}
 
       <Route
         path="/dashboard"
@@ -209,6 +233,8 @@ export default function AppRoutes() {
         }
       />
 
+      {WEBSITE && (
+        <>
       <Route
         path="/vendor"
         element={
@@ -258,9 +284,44 @@ export default function AppRoutes() {
           </ProtectedRoute>
         }
       />
+        </>
+      )}
 
       <Route path="/" element={<HomeRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
+    </CustomerAppGate>
   );
+}
+
+/**
+ * The customer app build (the Android app in React/mobile) is for customers
+ * only: a vendor or admin who signs in is told to use the website, and any
+ * other path goes to sign-in. On the website this does nothing.
+ */
+function CustomerAppGate({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const role = useAuthStore((s) => s.user?.role);
+  const logout = useAuthStore((s) => s.logout);
+  if (WEBSITE) return <>{children}</>;
+  if (isAuthenticated && role && role !== "customer") {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 text-center">
+        <div className="max-w-sm">
+          <i className="fas fa-mobile-screen text-4xl mb-4" style={{ color: "var(--primary)" }} aria-hidden />
+          <h1 className="text-xl font-bold mb-2">This app is for customers</h1>
+          <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
+            Vendor and admin accounts are managed on the FuelMart website. Sign out to use a customer account here.
+          </p>
+          <button type="button" className="btn btn-primary btn-block" onClick={() => void logout()}>
+            <i className="fas fa-right-from-bracket" aria-hidden /> Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (!isCustomerAppPath(location.pathname)) return <Navigate to="/login" replace />;
+  return <>{children}</>;
 }

@@ -31,8 +31,8 @@ export async function fetchBookingById(id: string): Promise<Booking> {
 }
 
 /** PATCH /api/bookings/:id/cancel -- the server owns the cancellation rules. */
-export async function cancelBooking(id: string): Promise<{ msg?: string; booking?: Booking }> {
-  const { data } = await apiClient.patch(`/bookings/${id}/cancel`);
+export async function cancelBooking(id: string, reason?: string): Promise<{ msg?: string; booking?: Booking }> {
+  const { data } = await apiClient.patch(`/bookings/${id}/cancel`, reason ? { reason } : undefined);
   return data;
 }
 
@@ -170,9 +170,24 @@ export interface QueuePreview {
     estimatedWaitSeconds: number;
     estimatedStartAt: string;
     estimatedCompleteAt: string;
-    /** "app-nozzle" (today's live line) or "reserved-slot" (another day). */
+    /** "scheduler" (the position a booking would get), "app-nozzle" (today's live line) or "reserved-slot". */
     basis: string;
   };
+  /** The scheduler's summary for the chosen window; null without one. */
+  schedule?: {
+    fuelType: string;
+    serviceDurationSeconds: number;
+    resources: number;
+    vehiclesServing: number;
+    queueAhead: number;
+    expectedWaitSeconds: number | null;
+    estimatedStartTime: string | null;
+    estimatedCompletionTime: string | null;
+    availableCapacity: number;
+    totalCapacity: number;
+    resourceAvailable: boolean;
+    reason: string | null;
+  } | null;
   date: string | null;
   timeSlot: string | null;
 }

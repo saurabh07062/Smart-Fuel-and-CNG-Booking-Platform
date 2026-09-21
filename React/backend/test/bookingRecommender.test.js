@@ -136,7 +136,8 @@ test("booking recommender against MongoDB", async (t) => {
     });
 
     await t.test("reserved nozzle: the nearest station that can take exactly this booking", async () => {
-      const taken = await book(target, "10:30 AM");
+      // The target's 10:30 window is fully booked on its Petrol nozzle.
+      await require("./helpers/fillWindow").fillWindow({ stationId: target._id, fuelType: "Petrol", date: DATE, label: "10:30 AM" });
       try {
         const r = await ask();
         assert.equal(r.target.canBook, false);
@@ -146,7 +147,7 @@ test("booking recommender against MongoDB", async (t) => {
         assert.equal(r.alternative.timeSavedMinutes, null);
         assert.equal(r.alternative.price, 100);
       } finally {
-        await Booking.deleteOne({ _id: taken._id });
+        await Booking.deleteMany({ station: target._id, bookingDate: DATE, timeSlot: "10:30 AM" });
       }
     });
 

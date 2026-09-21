@@ -16,6 +16,11 @@ interface ToastState {
 
 let nextId = 1;
 
+/** How long each toast stays on screen. */
+export const TOAST_MS = 3000;
+/** Older queued toasts are dropped beyond this, so a burst cannot back up for a minute. */
+const MAX_QUEUED = 4;
+
 /**
  * Toasts, replacing the global `toast()` in js/utils.js.
  *
@@ -29,12 +34,12 @@ export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
 
   push: (message, type = "info") => {
+    // The same message already on screen is not stacked again.
+    if (useToastStore.getState().toasts.some((t) => t.message === message && t.type === type)) return;
+    // A queue: ToastHost shows the first one only and dismisses it after
+    // TOAST_MS, then the next appears -- toasts never stack or overlap.
     const id = nextId++;
-    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }));
-    // Same 3.5s as the Vanilla version.
-    setTimeout(() => {
-      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
-    }, 3500);
+    set((s) => ({ toasts: [...s.toasts, { id, message, type }].slice(-MAX_QUEUED) }));
   },
 
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),

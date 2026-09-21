@@ -4,7 +4,8 @@
  * connects the database, attaches Socket.IO, listens and starts the jobs.
  */
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+// quiet: dotenv's own "injected env ... tip" banner is not an application log.
+require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -44,6 +45,10 @@ app.set("trust proxy", require("./config/proxy").trustProxySetting());
 // Cross-Origin-Resource-Policy: cross-origin below -- it runs later, so it
 // wins -- which keeps uploaded images loadable by the frontend's origin.
 app.use(helmet());
+
+// Request id (X-Request-Id) and one access-log line per request
+// (utils/logger.js). Logging is switched on by server.js only.
+app.use(require("./utils/logger").requestLogger());
 
 // Browser origins allowed to read API responses (config/cors.js); was `cors()`,
 // i.e. every website.
@@ -112,6 +117,55 @@ app.use("/uploads", (req, res) => {
   res.status(404).json({ msg: "File not found" });
 });
 
+// ---- the customer app ---------------------------------------------------
+// The customer-only build of the frontend (frontend: npm run build:customer ->
+// dist-customer), served at /app on the same origin as the API, so the
+// session cookies, API calls and Socket.IO work unchanged. The Android app
+// (React/mobile) opens this address. Vendor and admin pages are not in it.
+const fs = require("fs");
+const CUSTOMER_APP_DIR = process.env.CUSTOMER_APP_DIR || path.join(__dirname, "..", "..", "frontend", "dist-customer");
+app.use(
+  "/app",
+  (req, res, next) => {
+    // Source maps stay on the server (hidden build maps), never published.
+    if (req.path.endsWith(".map")) return res.status(404).end();
+    // The pages load Google Fonts, Font Awesome and Leaflet's stylesheet, and
+    // map tiles from OpenStreetMap / Esri.
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://unpkg.com",
+        "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' ws: wss:",
+        "base-uri 'self'",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+      ].join("; "),
+    );
+    next();
+  },
+  express.static(CUSTOMER_APP_DIR, {
+    dotfiles: "deny",
+    index: false,
+    // Hashed file names change with every build: cache them for good.
+    setHeaders: (res, filePath) => {
+      if (/[\\/]assets[\\/]/.test(filePath)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    },
+  }),
+  // Every other path under /app is a page of the single-page app.
+  (req, res) => {
+    const index = path.join(CUSTOMER_APP_DIR, "index.html");
+    if (!fs.existsSync(index)) {
+      return res.status(503).type("text").send("The customer app has not been built yet: run `npm run build:customer` in frontend/.");
+    }
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(index);
+  },
+);
+
 // Blanket API-wide floor: generous enough that no real user ever notices it,
 // tight enough that a script hammering any endpoint gets a 429 instead of a
 // free ride. Per-route limiters below (login, booking) are tighter on top of
@@ -125,6 +179,8 @@ app.use("/api", rateLimit({ limit: API_RATE_LIMIT_PER_MINUTE, windowMs: 60_000, 
 app.use("/api/auth", authRoutes);
 app.use("/api/stations", stationRoutes);
 app.use("/api/bookings", bookingRoutes);
+// Refuelling invoices (tax invoice / bill of supply) for completed bookings.
+app.use("/api/invoices", require("./routes/invoiceRoutes"));
 app.use("/api/razorpay", paymentRoutes);
 app.use("/api/vendors", vendorRoutes);
 app.use("/api/vendor-panel", vendorPanelRoutes);
@@ -143,6 +199,13 @@ app.use("/api/v1/queue", queueRoutes);
 // Simple health check route
 app.get("/", (req, res) => {
   res.send("FuelMart API is running MVC Architecture");
+});
+
+// Browsers ask for /favicon.ico whenever the API is opened directly. The API
+// has no icon (the frontend serves the app's own); answer "no content" so the
+// request is not logged as a 404 warning.
+app.get("/favicon.ico", (req, res) => {
+  res.status(204).end();
 });
 
 app.get("/api/health", async (req, res) => {
@@ -180,8 +243,15 @@ app.use("/api", (req, res) => {
 
 // Central error handler so a thrown error never leaks a stack trace to the client.
 app.use((err, req, res, _next) => {
-  console.error("[unhandled]", err);
-  res.status(err.status || 500).json({ msg: err.message || "Internal server error" });
+  const status = err.status || err.statusCode || 500;
+  require("./utils/logger")
+    .child("http")
+    .error("Unhandled request error", { requestId: req.id, method: req.method, path: (req.originalUrl || "").split("?")[0], status, err });
+  // A server fault's internal message is not shown to the caller; the request
+  // id lets support find the logged stack.
+  res.status(status).json(
+    status >= 500 ? { msg: "Internal server error", requestId: req.id } : { msg: err.message || "Request failed" },
+  );
 });
 
 module.exports = app;

@@ -13,6 +13,15 @@
  *                       presented again revokes the whole family (theft)
  *   revokeCurrentSession / revokeAllSessions  logout / logout everywhere
  *
+ * Per-tab sessions: a browser tab sends its own random id in the X-FM-Tab
+ * header, and its session lives in its own httpOnly cookies (fm_access_<tab>,
+ * fm_refresh_<tab>). So one browser can hold a vendor in one tab and a
+ * customer in another. The shared fm_access / fm_refresh pair is the most
+ * recent sign-in: a new tab starts from it and takes its own copy (a "fork",
+ * see rotateRefreshToken), after which other tabs' sign-ins no longer change
+ * it. A request without the header (scripts, tests, older clients) uses the
+ * shared pair exactly as before.
+ *
  * Refresh tokens are stored only as SHA-256 hashes (models/RefreshToken.js).
  * Every jwt.sign here is synchronous, so a failure is an exception inside the
  * caller's try -- never a throw from a callback that takes the process down.
@@ -48,6 +57,23 @@ const hashToken = (raw) => crypto.createHash("sha256").update(String(raw)).diges
 const tokenVersionOf = (user) => Number(user?.tokenVersion) || 0;
 const idOf = (user) => String(user?._id || user?.id || "");
 
+// ---------------------------------------------------------------- tabs
+
+const TAB_HEADER = "x-fm-tab";
+const TAB_RE = /^[a-z0-9]{8,24}$/;
+/** Tabs of one browser that keep their own cookies; older ones are dropped. */
+const MAX_TAB_SESSIONS = 8;
+
+/** The tab id a request carries, or null. */
+function tabOf(req) {
+  const raw = typeof req?.get === "function" ? req.get(TAB_HEADER) : req?.headers?.[TAB_HEADER];
+  const tab = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return TAB_RE.test(tab) ? tab : null;
+}
+const tabAccessCookie = (tab) => `${authConfig.ACCESS_COOKIE}_${tab}`;
+const tabRefreshCookie = (tab) => `${authConfig.REFRESH_COOKIE}_${tab}`;
+const TAB_ACCESS_RE = new RegExp(`^${authConfig.ACCESS_COOKIE}_([a-z0-9]{8,24})$`);
+
 // ------------------------------------------------------------ access tokens
 
 /** Synchronous. Carries only the user id and tokenVersion -- never a role. */
@@ -70,6 +96,11 @@ function verifyAccessToken(token) {
  * @returns {{token:string, source:"cookie"|"header"}|null}
  */
 function accessTokenFrom(req) {
+  // A tab with its own session uses only that one -- never the shared cookie,
+  // which may belong to a different account signed in from another tab.
+  const tab = tabOf(req);
+  const tabCookie = tab ? req.cookies?.[tabAccessCookie(tab)] : null;
+  if (typeof tabCookie === "string" && tabCookie) return { token: tabCookie, source: "cookie" };
   const cookie = req.cookies?.[authConfig.ACCESS_COOKIE];
   if (typeof cookie === "string" && cookie) return { token: cookie, source: "cookie" };
   const header = req.header?.("x-auth-token") || req.header?.("authorization")?.replace(/^Bearer\s+/i, "");
@@ -135,17 +166,53 @@ async function createRefreshToken(user, { family = crypto.randomUUID(), req = nu
   return { raw, doc };
 }
 
-function setSessionCookies(res, accessToken, refreshRaw) {
+/** Session cookies: the shared pair, or a tab's own pair when `tab` is given. */
+function setSessionCookies(res, accessToken, refreshRaw, tab = null) {
+  if (tab) {
+    // The tab's access cookie lives as long as its refresh token: its presence
+    // is what pins the tab to this session (accessTokenFrom). The JWT inside
+    // still expires in minutes.
+    res.cookie(tabAccessCookie(tab), accessToken, { ...authConfig.accessCookieOptions(), maxAge: authConfig.refreshTokenTtlMs() });
+    res.cookie(tabRefreshCookie(tab), refreshRaw, authConfig.refreshCookieOptions());
+    return;
+  }
   res.cookie(authConfig.ACCESS_COOKIE, accessToken, authConfig.accessCookieOptions());
   res.cookie(authConfig.REFRESH_COOKIE, refreshRaw, authConfig.refreshCookieOptions());
 }
 
-function clearSessionCookies(res) {
+function clearCookiePair(res, accessName, refreshName) {
   // clearCookie must match path/flags but must not carry maxAge.
   const { maxAge: _accessMaxAge, ...access } = authConfig.accessCookieOptions();
   const { maxAge: _refreshMaxAge, ...refresh } = authConfig.refreshCookieOptions();
-  res.clearCookie(authConfig.ACCESS_COOKIE, access);
-  res.clearCookie(authConfig.REFRESH_COOKIE, refresh);
+  res.clearCookie(accessName, access);
+  res.clearCookie(refreshName, refresh);
+}
+
+/**
+ * Clear the shared session cookies and, when `req` carries a tab id, that
+ * tab's own cookies too. Other tabs' sessions are left alone.
+ */
+function clearSessionCookies(res, req = null) {
+  const tab = req ? tabOf(req) : null;
+  if (tab) clearCookiePair(res, tabAccessCookie(tab), tabRefreshCookie(tab));
+  clearCookiePair(res, authConfig.ACCESS_COOKIE, authConfig.REFRESH_COOKIE);
+}
+
+/**
+ * Keep the cookie header small: beyond MAX_TAB_SESSIONS tab sessions in this
+ * browser, the ones signed in longest ago are dropped (those tabs fall back to
+ * the shared session and sign in again if they need to).
+ */
+function pruneTabSessions(req, res, keepTab) {
+  const tabs = [];
+  for (const [name, value] of Object.entries(req.cookies || {})) {
+    const m = TAB_ACCESS_RE.exec(name);
+    if (!m || m[1] === keepTab) continue;
+    const iat = Number(jwt.decode(String(value))?.iat) || 0;
+    tabs.push({ tab: m[1], iat });
+  }
+  tabs.sort((a, b) => b.iat - a.iat);
+  for (const { tab } of tabs.slice(MAX_TAB_SESSIONS - 1)) clearCookiePair(res, tabAccessCookie(tab), tabRefreshCookie(tab));
 }
 
 function revokeFamily(family, reason, now = new Date()) {
@@ -158,8 +225,17 @@ function revokeFamily(family, reason, now = new Date()) {
  */
 async function issueSession(req, res, user) {
   const accessToken = signAccessToken(user);
+  // The shared pair: the browser's latest sign-in, which new tabs start from.
   const { raw } = await createRefreshToken(user, { req });
   setSessionCookies(res, accessToken, raw);
+  // This tab's own session: a separate refresh-token family, so rotating one
+  // never invalidates the other.
+  const tab = tabOf(req);
+  if (tab) {
+    const { raw: tabRaw } = await createRefreshToken(user, { req });
+    setSessionCookies(res, accessToken, tabRaw, tab);
+    pruneTabSessions(req, res, tab);
+  }
   metrics.inc("session_issued_count");
   return accessToken;
 }
@@ -172,7 +248,13 @@ async function issueSession(req, res, user) {
  *   REFRESH_TOKEN_REUSED (a revoked token came back: its family is revoked)
  */
 async function rotateRefreshToken(req, res, { now = new Date() } = {}) {
-  const raw = req.cookies?.[authConfig.REFRESH_COOKIE];
+  const tab = tabOf(req);
+  const tabRaw = tab ? req.cookies?.[tabRefreshCookie(tab)] : null;
+  const ownTab = typeof tabRaw === "string" && tabRaw ? tab : null;
+  // A tab without its own session yet takes a copy of the shared one.
+  if (tab && !ownTab) return forkSharedSession(req, res, tab, now);
+
+  const raw = ownTab ? tabRaw : req.cookies?.[authConfig.REFRESH_COOKIE];
   if (typeof raw !== "string" || !raw) {
     throw new SessionError(401, "NO_REFRESH_TOKEN", "Please sign in again.");
   }
@@ -207,19 +289,60 @@ async function rotateRefreshToken(req, res, { now = new Date() } = {}) {
   const accessToken = signAccessToken(user);
   const { raw: nextRaw, doc } = await createRefreshToken(user, { family: current.family, req, now });
   await RefreshToken.updateOne({ _id: current._id }, { $set: { replacedBy: doc._id } });
-  setSessionCookies(res, accessToken, nextRaw);
+  setSessionCookies(res, accessToken, nextRaw, ownTab);
   metrics.inc("session_refreshed_count");
+  return { user, accessToken };
+}
+
+/**
+ * Give a tab its own session from the browser's shared one. The shared
+ * refresh token is checked, not rotated (other new tabs may be forking from
+ * it at the same moment); the tab gets a new refresh-token family.
+ */
+async function forkSharedSession(req, res, tab, now) {
+  const raw = req.cookies?.[authConfig.REFRESH_COOKIE];
+  if (typeof raw !== "string" || !raw) {
+    throw new SessionError(401, "NO_REFRESH_TOKEN", "Please sign in again.");
+  }
+  const tokenHash = hashToken(raw);
+  const shared = await RefreshToken.findOne({ tokenHash, revokedAt: null, expiresAt: { $gt: now } }).select("user").lean();
+  if (!shared) {
+    const known = await RefreshToken.findOne({ tokenHash }).select("revokedAt revokedReason").lean();
+    if (known?.revokedReason === "rotated" && now - new Date(known.revokedAt) <= REFRESH_RACE_GRACE_MS) {
+      throw new SessionError(401, "REFRESH_IN_PROGRESS", "Your session was just refreshed. Please retry.");
+    }
+    throw new SessionError(401, "INVALID_REFRESH_TOKEN", "Please sign in again.");
+  }
+  const user = await User.findById(shared.user).select("-password").lean();
+  if (!user) throw new SessionError(401, "INVALID_REFRESH_TOKEN", "Please sign in again.");
+
+  const accessToken = signAccessToken(user);
+  const { raw: tabRaw } = await createRefreshToken(user, { req, now });
+  setSessionCookies(res, accessToken, tabRaw, tab);
+  pruneTabSessions(req, res, tab);
+  metrics.inc("session_forked_count");
   return { user, accessToken };
 }
 
 /** Sign this device out: revoke its refresh-token family and clear the cookies. */
 async function revokeCurrentSession(req, res, { now = new Date() } = {}) {
-  const raw = req.cookies?.[authConfig.REFRESH_COOKIE];
-  if (typeof raw === "string" && raw) {
-    const token = await RefreshToken.findOne({ tokenHash: hashToken(raw) }).select("family").lean();
-    if (token) await revokeFamily(token.family, "logout", now);
-  }
-  clearSessionCookies(res);
+  const tab = tabOf(req);
+  const tabRaw = tab ? req.cookies?.[tabRefreshCookie(tab)] : null;
+  const sharedRaw = req.cookies?.[authConfig.REFRESH_COOKIE];
+  const find = (raw) =>
+    typeof raw === "string" && raw ? RefreshToken.findOne({ tokenHash: hashToken(raw) }).select("family user").lean() : null;
+
+  const own = await find(tabRaw);
+  const shared = await find(sharedRaw);
+  const sameAccount = Boolean(own && shared && String(shared.user) === String(own.user));
+  if (own) await revokeFamily(own.family, "logout", now);
+  // The shared session goes too when it is the same account (or this tab has
+  // no session of its own), so a new tab does not come back signed in. Another
+  // account's shared session -- signed in from a different tab -- stays.
+  if (shared && (!own || sameAccount)) await revokeFamily(shared.family, "logout", now);
+
+  if (tab) clearCookiePair(res, tabAccessCookie(tab), tabRefreshCookie(tab));
+  if (!own || !shared || sameAccount) clearCookiePair(res, authConfig.ACCESS_COOKIE, authConfig.REFRESH_COOKIE);
 }
 
 /**
@@ -252,6 +375,11 @@ async function revokeAllSessions(userId, { now = new Date() } = {}) {
 module.exports = {
   ALGORITHM,
   REFRESH_RACE_GRACE_MS,
+  TAB_HEADER,
+  MAX_TAB_SESSIONS,
+  tabOf,
+  tabAccessCookie,
+  tabRefreshCookie,
   SessionError,
   hashToken,
   signAccessToken,

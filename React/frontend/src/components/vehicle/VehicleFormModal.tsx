@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Vehicle } from "@/types";
 import Modal from "@/components/common/Modal";
-import { detectVehicleType, getVehicleIcon, validateImageFile } from "@/utils/vehicle";
+import { detectVehicleType, getVehicleIcon, isValidPlate, normalisePlate, validateImageFile } from "@/utils/vehicle";
 import { uploadUrl } from "@/services/api/apiClient";
 import { pushToast } from "@/store/toastStore";
 
@@ -107,12 +107,24 @@ export default function VehicleFormModal({ open, vehicle, saving, onClose, onSub
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  // A plate saved before this check existed may be kept as it is; a new or
+  // changed one must be a real registration number.
+  const plateChanged = normalisePlate(form.registrationNumber) !== normalisePlate(vehicle?.registrationNumber || "");
+  const plateError =
+    form.registrationNumber && plateChanged && !isValidPlate(form.registrationNumber)
+      ? "Enter a valid number, e.g. MH12AB1234"
+      : null;
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (plateError) {
+      pushToast(plateError, "error");
+      return;
+    }
     onSubmit(
       {
         ...form,
-        registrationNumber: form.registrationNumber.trim().toUpperCase(),
+        registrationNumber: plateChanged ? normalisePlate(form.registrationNumber) : form.registrationNumber.trim().toUpperCase(),
       },
       file,
     );
@@ -252,10 +264,16 @@ export default function VehicleFormModal({ open, vehicle, saving, onClose, onSub
               placeholder="MH12AB1234"
               required
               value={form.registrationNumber}
-              onChange={(e) => set("registrationNumber", e.target.value)}
+              onChange={(e) => set("registrationNumber", normalisePlate(e.target.value))}
+              maxLength={12}
+              autoCapitalize="characters"
+              aria-invalid={!!plateError}
+              aria-describedby="plate-hint"
             />
           </div>
-          <span className="field-hint">Letters and numbers only, e.g. MH12AB1234</span>
+          <span id="plate-hint" className="field-hint" style={plateError ? { color: "var(--danger)" } : undefined}>
+            {plateError ?? "e.g. MH12AB1234 or 22BH1234AA"}
+          </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

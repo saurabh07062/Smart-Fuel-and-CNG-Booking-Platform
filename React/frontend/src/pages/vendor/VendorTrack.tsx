@@ -85,6 +85,8 @@ export default function VendorTrack() {
   // The event the applicant is waiting for. Refetching rather than patching
   // from the payload keeps this page's shape owned by one source.
   useSocketEvent(SOCKET_EVENTS.VENDOR_APPROVED, () => void load(), [load]);
+  // Under review, rejected, suspended, reactivated: the page shows it live too.
+  useSocketEvent(SOCKET_EVENTS.VENDOR_STATUS_CHANGED, () => void load(), [load]);
 
   const activate = async () => {
     if (!code.trim()) {

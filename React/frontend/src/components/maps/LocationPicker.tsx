@@ -3,7 +3,7 @@ import L from "leaflet";
 import { useLeafletMap } from "@/hooks/useLeafletMap";
 import { useLocationStore } from "@/store/locationStore";
 import { pushToast } from "@/store/toastStore";
-import { getFreshUserCoords } from "@/utils/geo";
+import { GPS_POOR_ACCURACY_M, getFreshUserCoords } from "@/utils/geo";
 
 /**
  * Port of initDashboardMap() / setDashboardMarker() in js/pages/dashboard.js.
@@ -16,6 +16,9 @@ import { getFreshUserCoords } from "@/utils/geo";
 export default function LocationPicker({ children }: { children?: ReactNode }) {
   const coords = useLocationStore((s) => s.coords);
   const setCoords = useLocationStore((s) => s.setCoords);
+  const located = useLocationStore((s) => s.located);
+  const gpsFailed = useLocationStore((s) => s.gpsFailed);
+  const markGpsFailed = useLocationStore((s) => s.markGpsFailed);
   const [locating, setLocating] = useState(false);
 
   // The map opens on a known point when there is one, so a returning user is
@@ -24,6 +27,8 @@ export default function LocationPicker({ children }: { children?: ReactNode }) {
     coords ? { center: [coords.lat, coords.lng], zoom: 14 } : {},
   );
   const markerRef = useRef<L.Marker | null>(null);
+  // How precise the last device fix was: drawn as a circle around the pin.
+  const accuracyRef = useRef<L.Circle | null>(null);
 
   // setCoords in a ref so the map's click handler is bound once, and cannot
   // capture a stale copy of it.
@@ -34,8 +39,10 @@ export default function LocationPicker({ children }: { children?: ReactNode }) {
     const map = mapRef.current;
     if (!ready || !map) return;
 
-    const onClick = (e: L.LeafletMouseEvent) =>
+    const onClick = (e: L.LeafletMouseEvent) => {
+      clearAccuracy();
       setCoordsRef.current(e.latlng.lat, e.latlng.lng);
+    };
 
     map.on("click", onClick);
     return () => {
@@ -73,14 +80,24 @@ export default function LocationPicker({ children }: { children?: ReactNode }) {
     const marker = L.marker([coords.lat, coords.lng], { draggable: true, icon }).addTo(map);
     marker.on("dragend", (ev) => {
       const p = (ev.target as L.Marker).getLatLng();
+      clearAccuracy();
       setCoordsRef.current(p.lat, p.lng);
     });
     markerRef.current = marker;
   }, [coords, ready, mapRef]);
 
+  // A clicked or dragged pin is exact: the device's accuracy no longer applies.
+  function clearAccuracy() {
+    if (accuracyRef.current) {
+      accuracyRef.current.remove();
+      accuracyRef.current = null;
+    }
+  }
+
   const useMyLocation = async () => {
     if (!navigator.geolocation) {
-      pushToast("Geolocation not available", "error");
+      markGpsFailed();
+      pushToast("Location is not available on this device. Tap the map to set it.", "error");
       return;
     }
     setLocating(true);
@@ -88,12 +105,33 @@ export default function LocationPicker({ children }: { children?: ReactNode }) {
     setLocating(false);
 
     if (!fix) {
-      pushToast("Please allow location access to find nearby fuel stations.", "error");
+      markGpsFailed();
+      pushToast("Could not get your location. Allow location access, or tap the map to set it.", "error");
       return;
     }
-    setCoords(fix.lat, fix.lng);
-    mapRef.current?.setView([fix.lat, fix.lng], 14);
-    pushToast("Location found!", "success");
+    setCoords(fix.lat, fix.lng, "gps");
+    const map = mapRef.current;
+    clearAccuracy();
+    const meters = typeof fix.accuracy === "number" ? Math.round(fix.accuracy) : null;
+    if (map && meters) {
+      accuracyRef.current = L.circle([fix.lat, fix.lng], {
+        radius: meters,
+        color: "#3b82f6",
+        weight: 1,
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+      map.fitBounds(accuracyRef.current.getBounds(), { maxZoom: 17 });
+    } else {
+      map?.setView([fix.lat, fix.lng], 16);
+    }
+    if (meters && meters > GPS_POOR_ACCURACY_M) {
+      // No GPS signal (a laptop, or indoors): the browser fell back to Wi-Fi /
+      // network position. Say so instead of presenting it as exact.
+      pushToast(`Approximate location (±${meters} m) — no GPS signal. Drag the pin to your exact spot.`, "warning");
+    } else {
+      pushToast(meters ? `Location found (GPS, ±${meters} m)` : "Location found!", "success");
+    }
   };
 
   return (
@@ -104,7 +142,13 @@ export default function LocationPicker({ children }: { children?: ReactNode }) {
         style={{ background: "var(--bg2)" }}
       />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <span className="text-xs text-[var(--muted)]">Tip: Click on map to set location</span>
+        <span className="text-xs text-[var(--muted)]">
+          {located
+            ? "Tip: drag the pin to your exact spot"
+            : gpsFailed
+              ? "Tap the map to set your location"
+              : "First tap “Use my location”"}
+        </span>
         <button
           type="button"
           className="btn btn-outline btn-sm text-xs border-[var(--border)]"

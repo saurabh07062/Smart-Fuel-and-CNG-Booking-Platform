@@ -10,6 +10,8 @@ interface Options {
   /** The stations map hides the default control and adds one bottom-right. */
   zoomControl?: boolean;
   zoomControlPosition?: L.ControlPosition;
+  /** false: add no base tiles -- the caller manages its own layers (the pin picker's Map/Satellite switch). */
+  baseTiles?: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ export function useLeafletMap(options: Options = {}) {
     zoom = 12,
     zoomControl = true,
     zoomControlPosition,
+    baseTiles = true,
   } = options;
 
   useEffect(() => {
@@ -54,11 +57,13 @@ export function useLeafletMap(options: Options = {}) {
       L.control.zoom({ position: zoomControlPosition }).addTo(map);
     }
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors",
-      maxZoom: 19,
-    }).addTo(map);
+    if (baseTiles) {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors",
+        maxZoom: 19,
+      }).addTo(map);
+    }
 
     mapRef.current = map;
     setReady(true);

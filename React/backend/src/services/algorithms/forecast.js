@@ -70,7 +70,7 @@ function holtLinearTrend(series, alpha = 0.3, beta = 0.1, horizon = 1) {
   const xs = clean(series);
   if (xs.length < 2) {
     const ses = exponentialSmoothing(xs, alpha);
-    return { level: ses.forecast, trend: 0, forecast: ses.forecast, points: [] };
+    return { level: ses.forecast, trend: 0, forecast: ses.forecast, points: [], fitted: [] };
   }
 
   const a = clamp01(alpha);
@@ -79,8 +79,13 @@ function holtLinearTrend(series, alpha = 0.3, beta = 0.1, horizon = 1) {
   let level = xs[0];
   let trend = xs[1] - xs[0];
   const points = [level];
+  // One-step-ahead forecasts: fitted[t-1] is what the model predicted for
+  // x_t before seeing it (level + trend of period t-1) -- what its error is
+  // measured against. The level alone leaves the trend out.
+  const fitted = [];
 
   for (let t = 1; t < xs.length; t++) {
+    fitted.push(level + trend);
     const prevLevel = level;
     level = a * xs[t] + (1 - a) * (level + trend);
     trend = b * (level - prevLevel) + (1 - b) * trend;
@@ -93,6 +98,7 @@ function holtLinearTrend(series, alpha = 0.3, beta = 0.1, horizon = 1) {
     trend: round2(trend),
     forecast: round2(Math.max(0, level + h * trend)),
     points: points.map(round2),
+    fitted: fitted.map(round2),
   };
 }
 
@@ -148,7 +154,9 @@ function forecast(series, { horizon = 1, alpha = 0.3, beta = 0.1 } = {}) {
   const holt = holtLinearTrend(xs, alpha, beta, horizon);
 
   const sesErr = mape(xs.slice(1), ses.smoothed.slice(0, -1));
-  const holtErr = mape(xs.slice(1), holt.points.slice(0, -1));
+  // Holt's trend is seeded from x_0 and x_1, so its forecast of x_1 is exact
+  // by construction; its error is measured from x_2 on.
+  const holtErr = mape(xs.slice(2), holt.fitted.slice(1));
 
   // Prefer Holt only when the trend is meaningful relative to the level;
   // a near-zero slope means SES is the simpler equivalent model.

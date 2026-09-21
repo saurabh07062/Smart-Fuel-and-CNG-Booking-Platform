@@ -15,8 +15,5 @@
     "test:realtime": "node --test backend/test/realtime.test.js",
     "db:export": "node database/export.js",
     "db:import": "node database/import.js"
-  },
-  "dependencies": {
-    "backend": "^0.0.0"
   }
 }

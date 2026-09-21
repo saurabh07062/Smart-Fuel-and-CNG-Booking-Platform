@@ -33,6 +33,19 @@ export async function fetchStationById(id: string): Promise<UiStation | null> {
   return mapBackendStation(data as Station & Record<string, unknown>);
 }
 
+/**
+ * GET /stations/:id/route -- driving distance along the roads from `from`
+ * to the station, as Google Maps measures a route (distanceType "road"),
+ * or the straight line when no route is available ("straight").
+ */
+export async function fetchRouteDistance(
+  stationId: string,
+  from: { lat: number; lng: number },
+): Promise<{ distanceKm: number; distanceType: "road" | "straight" | "fixed"; straightLineKm: number }> {
+  const { data } = await apiClient.get(`/stations/${stationId}/route`, { params: { lat: String(from.lat), lng: String(from.lng) } });
+  return data;
+}
+
 export interface NearbyResponse {
   success: boolean;
   stations: NearbyStation[];

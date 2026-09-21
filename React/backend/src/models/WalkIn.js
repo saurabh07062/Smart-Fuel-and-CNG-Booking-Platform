@@ -41,6 +41,11 @@ const WalkInSchema = new mongoose.Schema(
     cancelledAt: { type: Date, default: null },
     // Decided from the quantity when recorded (config/fuelDurations.js).
     serviceDurationSeconds: { type: Number, required: true, min: 1 },
+    // Which nozzle it fuels at: 0 = the shared app nozzle; 1..n = the
+    // station's walk-in nozzles for this fuel (config/nozzleModes.js).
+    lane: { type: Number, default: null },
+    // With lane 0 (an app nozzle shared with bookings): which one, 1..n.
+    resource: { type: Number, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },
@@ -50,9 +55,16 @@ const WalkInSchema = new mongoose.Schema(
 WalkInSchema.index({ station: 1, fuelType: 1, status: 1, arrivalTime: 1 });
 WalkInSchema.index({ status: 1, businessDate: 1 });
 
+// One walk-in fuelling per nozzle at a time: a walk-in nozzle (lane 1..n), or
+// an app nozzle (lane 0, resource 1..n).
 WalkInSchema.index(
-  { station: 1, fuelType: 1 },
-  { name: "uniq_serving_walkin_per_station_fuel", unique: true, partialFilterExpression: { status: "serving" } },
+  { station: 1, fuelType: 1, lane: 1, resource: 1 },
+  { name: "uniq_serving_walkin_per_nozzle", unique: true, partialFilterExpression: { status: "serving" } },
 );
+
+/** Old guards replaced by the ones above: services/core/schedulingIndexes.js. */
+WalkInSchema.statics.ensureLaneIndexes = function ensureLaneIndexes() {
+  return require("../services/core/schedulingIndexes").ensureSchedulingIndexes();
+};
 
 module.exports = mongoose.model("WalkIn", WalkInSchema);

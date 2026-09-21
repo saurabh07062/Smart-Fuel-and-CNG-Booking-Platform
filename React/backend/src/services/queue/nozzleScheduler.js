@@ -1,19 +1,22 @@
 /**
- * Interval scheduling, one app nozzle per fuel.
+ * The booking scheduler: capacity, allocation and overlap for each fuel's
+ * app nozzles -- the one place bookings get their time and nozzle.
  *
- * Each station has exactly one nozzle allocated to app bookings for EACH fuel
- * it sells: one Petrol nozzle, one Diesel nozzle, one CNG nozzle. A booking
- * occupies a non-overlapping slice of its own fuel's nozzle timeline; a CNG
- * booking never blocks a Petrol one. Vendor-recorded walk-ins (models/WalkIn.js)
- * use the same nozzle as that fuel's bookings.
+ *   - A slot label ("10:00 AM") is a 30-minute booking WINDOW, India time.
+ *   - A fuel has R app nozzles (resources, config/nozzleModes.js); Petrol,
+ *     Diesel and CNG never share one.
+ *   - Each booking occupies [start, start + its service duration) on one
+ *     nozzle (config/fuelDurations.js); no two overlap on the same nozzle:
  *
- * A requested [start, end) window is available only if NO existing active
- * booking for that station AND fuel overlaps it:
+ *       aStart < bEnd  AND  aEnd > bStart   ->  conflict
  *
- *   requestedStart < existingEnd  AND  requestedEnd > existingStart
+ *   - Inside a window a booking gets the earliest free position on any nozzle
+ *     (services/queue/slotAllocator.js), around every reservation and the
+ *     nozzles' live use: the vehicle being served, vehicles checked in and
+ *     walk-ins at an app nozzle (services/queue/stationQueue.js).
+ *   - A window's capacity = R x floor(window / duration), less what is taken.
  *
- * Slot labels ("10:00 AM") are India time (config/businessTime.js); the
- * window is stored as UTC instants.
+ * Instants are stored as UTC.
  */
 
 const Booking = require("../../models/Booking");
@@ -22,7 +25,9 @@ const WalkIn = require("../../models/WalkIn");
 const { normaliseFuel, fuelLabel } = require("../../config/fuels");
 const { getServiceDurationSeconds } = require("../../config/fuelDurations");
 const { parseClock, atBusinessTime, parseDateKey, dateKey } = require("../../config/businessTime");
-const { BOOKABLE_SLOT_LABELS, isSlotElapsed } = require("../../config/booking");
+const { BOOKABLE_SLOT_LABELS, isSlotElapsed, SLOT_SPACING_SECONDS, SLOT_GRID_SECONDS } = require("../../config/booking");
+const nozzleSetup = require("../../config/nozzleModes");
+const allocator = require("./slotAllocator");
 
 const STANDARD_12H_SLOTS = BOOKABLE_SLOT_LABELS;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -81,10 +86,13 @@ function computeWindow(fuelType, startDate, quantity) {
  * @param {string} [excludeBookingId] skip this booking
  * @param {object} [opts] { now, fuelType }
  */
-async function hasOverlap(stationId, startDate, endDate, excludeBookingId, { now = new Date(), fuelType = null } = {}) {
+async function hasOverlap(stationId, startDate, endDate, excludeBookingId, { now = new Date(), fuelType = null, resource = null } = {}) {
+  // Nozzle 1 includes bookings made before nozzles were numbered (resource null).
+  const onResource = resource ? { resource: resource === 1 ? { $in: [1, null] } : resource } : {};
   const query = {
     station: stationId,
     ...fuelFilter(fuelType),
+    ...onResource,
     status: { $in: NOZZLE_OCCUPYING_STATUSES },
     bookingStartTime: { $lt: endDate },
     bookingEndTime: { $gt: startDate },
@@ -99,6 +107,7 @@ async function hasOverlap(stationId, startDate, endDate, excludeBookingId, { now
   return live.some(
     (w) =>
       sameFuel(w.fuelType, fuelType) &&
+      (!resource || w.resource === resource) &&
       w.bookingId !== String(excludeBookingId || "") &&
       windowsOverlap(startDate, endDate, w.start, w.end),
   );
@@ -121,7 +130,7 @@ async function liveServiceWindows(stationIds, now = new Date()) {
   const byStation = new Map();
   if (!stationIds?.length) return byStation;
 
-  const { simulateNozzleLine, walkInRow, groupByFuel } = require("./stationQueue");
+  const { simulateNozzleLine, walkInRow, groupByFuel, appLineWalkIns, resourcesByFuelOf } = require("./stationQueue");
   const [bookings, walkIns] = await Promise.all([
     Booking.find({
       station: { $in: stationIds },
@@ -138,7 +147,9 @@ async function liveServiceWindows(stationIds, now = new Date()) {
       $or: [{ status: "serving" }, { businessDate: dateKey(now) }],
     }).lean(),
   ]);
-  const rows = [...bookings, ...walkIns.map(walkInRow)];
+  // Walk-ins on their own nozzles (config/nozzleModes.js) never use the app
+  // nozzle, so they never block a booking slot.
+  const rows = [...bookings, ...(await appLineWalkIns(walkIns)).map(walkInRow)];
   if (rows.length === 0) return byStation;
 
   const seconds = (b) =>
@@ -149,11 +160,15 @@ async function liveServiceWindows(stationIds, now = new Date()) {
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(r);
   }
+  const stations = new Map(
+    (await Station.find({ _id: { $in: [...grouped.keys()] } }).select("nozzleConfig").lean()).map((st) => [String(st._id), st]),
+  );
   for (const [key, list] of grouped) {
     const byId = new Map(list.map((b) => [String(b._id), b]));
     const windows = [];
-    for (const fuelLine of groupByFuel(list).values()) {
-      for (const e of simulateNozzleLine(fuelLine, now).etas) {
+    const resources = resourcesByFuelOf(stations.get(key));
+    for (const [fuel, fuelLine] of groupByFuel(list)) {
+      for (const e of simulateNozzleLine(fuelLine, now, { resources: resources[fuel] }).etas) {
         const b = byId.get(e.bookingId);
         if (!b) continue;
         const start = b.status === "serving" ? new Date(b.fuelingStartTime) : new Date(e.turnAt);
@@ -163,6 +178,7 @@ async function liveServiceWindows(stationIds, now = new Date()) {
           status: "live",
           bookingId: e.bookingId,
           fuelType: fuelLabel(b.fuelType),
+          resource: e.resource,
         });
       }
     }
@@ -200,26 +216,34 @@ async function generateAvailability(stationId, fuelType, bookingDate, { station 
   const fuel = normaliseFuel(fuelType);
   if (!fuel || !parseDateKey(bookingDate)) return [];
 
+  // Opening hours and the fuel's nozzle count.
+  const st = station?.nozzleConfig !== undefined && station?.operatingSchedule !== undefined
+    ? station
+    : await Station.findById(stationId).select("nozzleConfig operatingSchedule openingHours status").lean();
   const dayStart = atBusinessTime(bookingDate, 0, 0);
   const windows =
     (await loadActiveWindows([stationId], dayStart, new Date(dayStart.getTime() + DAY_MS), { now, fuelType: fuel })).get(
       String(stationId),
     ) || [];
-  return describeLabels(windows, fuel, bookingDate, { station, now, quantity });
+  return describeLabels(windows, fuel, bookingDate, { station: st, now, quantity });
 }
 
 /**
  * labelAvailability plus the other two reasons a label cannot be booked.
- * reason: "PASSED" | "CLOSED" | "RESERVED" | null (bookable).
+ * reason: "PASSED" | "CLOSED" | "RESERVED" (full) | null (bookable).
  * `windows` must already be this fuel's (loadActiveWindows with fuelType).
  */
 function describeLabels(windows, fuelType, bookingDate, { station = null, now = new Date(), quantity } = {}) {
-  return labelAvailability(windows, fuelType, bookingDate, STANDARD_12H_SLOTS, quantity).map((s) => {
+  const resources = station ? nozzleSetup.onlineResources(station, fuelType) : 1;
+  return labelAvailability(windows, fuelType, bookingDate, STANDARD_12H_SLOTS, quantity, { resources, now }).map((s) => {
     const elapsed = isSlotElapsed(bookingDate, s.label, now);
     const withinHours = station ? Station.scheduleAllowsSlot(station, bookingDate, s.label) : true;
     const reason = elapsed ? "PASSED" : !withinHours ? "CLOSED" : !s.available ? "RESERVED" : null;
+    // A passed or closed window takes no bookings, whatever the nozzles could hold.
+    const capacity = reason === "PASSED" || reason === "CLOSED" ? { ...s.capacity, available: 0 } : s.capacity;
     return {
       ...s,
+      capacity,
       durationSeconds: s.start ? Math.round((s.end - s.start) / 1000) : null,
       elapsed,
       withinHours,
@@ -235,7 +259,7 @@ function describeLabels(windows, fuelType, bookingDate, { station = null, now = 
 // stations, instead of one query per label per station.
 // ---------------------------------------------------------------------------
 
-/** App bookings have one nozzle per fuel at each station (see top of file). */
+/** Nozzles for app bookings when a fuel has not been set up (config/nozzleModes.js). */
 const APP_NOZZLES = 1;
 
 /** The overlap rule, in one place: [aStart, aEnd) meets [bStart, bEnd). */
@@ -262,16 +286,27 @@ async function loadActiveWindows(stationIds, from, to, { now = new Date(), fuelT
     bookingStartTime: { $lt: to },
     bookingEndTime: { $gt: from },
   })
-    .select("station status fuelType bookingStartTime bookingEndTime")
+    .select("_id station status fuelType resource bookingStartTime bookingEndTime")
     .lean();
 
+  const live = await liveServiceWindows(stationIds, now);
+  const inLiveLine = new Set([...live.values()].flat().map((w) => w.bookingId));
+
   for (const r of rows) {
+    // Checked in or being served: its live window (below) is where it really is.
+    if (inLiveLine.has(String(r._id))) continue;
     const key = String(r.station);
     if (!byStation.has(key)) byStation.set(key, []);
-    byStation.get(key).push({ start: r.bookingStartTime, end: r.bookingEndTime, status: r.status, fuelType: r.fuelType });
+    byStation.get(key).push({
+      start: r.bookingStartTime,
+      end: r.bookingEndTime,
+      status: r.status,
+      fuelType: r.fuelType,
+      resource: r.resource || 1,
+      bookingId: String(r._id),
+    });
   }
 
-  const live = await liveServiceWindows(stationIds, now);
   for (const [key, windows] of live) {
     for (const w of windows) {
       if (!sameFuel(w.fuelType, fuelType)) continue;
@@ -283,20 +318,87 @@ async function loadActiveWindows(stationIds, from, to, { now = new Date(), fuelT
   return byStation;
 }
 
+/** Occupied intervals (ms) per nozzle, index 0 = nozzle 1. */
+function busyByResource(windows, resources) {
+  const busy = Array.from({ length: Math.max(0, resources) }, () => []);
+  if (!busy.length) return busy;
+  for (const w of windows || []) {
+    const i = Math.min(busy.length, Math.max(1, Number(w.resource) || 1)) - 1;
+    busy[i].push({ start: new Date(w.start).getTime(), end: new Date(w.end).getTime() });
+  }
+  return busy;
+}
+
+/** A window's [start, end) instants for a label on a day, or null. */
+function windowOf(bookingDate, label) {
+  const start = parseStartDateTime(bookingDate, label);
+  return start ? { start, end: new Date(start.getTime() + SLOT_SPACING_SECONDS * 1000) } : null;
+}
+
 /**
  * Availability of each label on `bookingDate` against already-loaded windows
  * -- the same answer generateAvailability() gives, without a query per label.
  *
  * @returns {Array<{label:string, start:Date|null, end:Date|null, available:boolean}>}
  */
-function labelAvailability(windows, fuelType, bookingDate, labels = STANDARD_12H_SLOTS, quantity) {
+function labelAvailability(windows, fuelType, bookingDate, labels = STANDARD_12H_SLOTS, quantity, { resources = 1, now = new Date() } = {}) {
+  const durationSeconds = getServiceDurationSeconds(fuelType, quantity);
+  const busy = busyByResource(windows, resources);
+  const reservedStarts = (windows || []).filter((w) => w.status !== "live").map((w) => new Date(w.start).getTime());
   return labels.map((label) => {
-    const start = parseStartDateTime(bookingDate, label);
-    const w = start && computeWindow(fuelType, start, quantity);
-    if (!w) return { label, start: null, end: null, available: false };
-    const busy = (windows || []).some((x) => windowsOverlap(w.start, w.end, x.start, x.end));
-    return { label, start: w.start, end: w.end, available: !busy };
+    const win = windowOf(bookingDate, label);
+    if (!win) return { label, start: null, end: null, available: false, capacity: { total: 0, available: 0, reserved: 0, resources } };
+    const common = {
+      windowStart: win.start.getTime(),
+      windowEnd: win.end.getTime(),
+      notBefore: now.getTime(),
+      durationMs: durationSeconds * 1000,
+      busyByResource: busy,
+      gridMs: SLOT_GRID_SECONDS * 1000,
+    };
+    const capacity = allocator.windowCapacity({ ...common, reservedStarts });
+    const next = allocator.allocate(common);
+    // start/end: the earliest position a new booking would get in this window
+    // (the window's own start when it is full).
+    const start = next ? new Date(next.start) : win.start;
+    return {
+      label,
+      start,
+      end: new Date(start.getTime() + durationSeconds * 1000),
+      windowEnd: win.end,
+      resource: next ? next.resource : null,
+      available: capacity.available > 0,
+      capacity,
+    };
   });
+}
+
+/**
+ * The earliest free position for one booking in one window, or null when the
+ * window is full: { resource, start, end, durationSeconds }. The caller holds
+ * the fuel's nozzle lock (services/booking/bookingCreate.js), so nothing moves
+ * between this answer and the write.
+ */
+async function allocateInWindow(stationId, fuelType, bookingDate, label, { quantity, now = new Date(), station = null } = {}) {
+  const fuel = normaliseFuel(fuelType);
+  const win = windowOf(bookingDate, label);
+  if (!fuel || !win) return null;
+  const st = station?.nozzleConfig !== undefined ? station : await Station.findById(stationId).select("nozzleConfig").lean();
+  const resources = nozzleSetup.onlineResources(st, fuel);
+  if (resources < 1) return null;
+  const durationSeconds = getServiceDurationSeconds(fuel, quantity);
+  // Anything that could overlap a service inside this window.
+  const from = new Date(win.start.getTime() - SLOT_SPACING_SECONDS * 1000);
+  const windows = (await loadActiveWindows([stationId], from, win.end, { now, fuelType: fuel })).get(String(stationId)) || [];
+  const next = allocator.allocate({
+    windowStart: win.start.getTime(),
+    windowEnd: win.end.getTime(),
+    notBefore: now.getTime(),
+    durationMs: durationSeconds * 1000,
+    busyByResource: busyByResource(windows, resources),
+    gridMs: SLOT_GRID_SECONDS * 1000,
+  });
+  return next ? { resource: next.resource, start: new Date(next.start), end: new Date(next.end), durationSeconds } : null;
 }
 
 module.exports = {
@@ -312,4 +414,7 @@ module.exports = {
   liveServiceWindows,
   labelAvailability,
   describeLabels,
+  allocateInWindow,
+  busyByResource,
+  windowOf,
 };

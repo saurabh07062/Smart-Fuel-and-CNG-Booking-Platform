@@ -54,6 +54,11 @@ const BookingSchema = new mongoose.Schema(
     bookingStartTime:      { type: Date, default: null },
     bookingEndTime:        { type: Date, default: null },
     serviceDurationSeconds: { type: Number, default: null },
+    // Which of the fuel's app nozzles (booking resources) it is scheduled on,
+    // 1..n (config/nozzleModes.js). Missing on bookings made before nozzles were
+    // numbered: those count as nozzle 1. New bookings always carry one, so the
+    // per-nozzle database guards below always apply to them.
+    resource: { type: Number, default: 1, min: 1 },
 
     // ── Vehicle ─────────────────────────────────────────────────────────────
     vehiclePlate:     { type: String },
@@ -81,6 +86,8 @@ const BookingSchema = new mongoose.Schema(
     // cancellations; a vendor or admin cancelling is not the customer's doing.
     cancelledAt: { type: Date, default: null },
     cancelledBy: { type: String, enum: ["customer", "vendor", "admin", "system"], default: undefined },
+    // Why the customer cancelled, when they said.
+    cancelReason: { type: String, enum: ["plans_changed", "wrong_slot", "too_far", "long_wait", "other"], default: undefined },
 
     // ── Queue & ETA ─────────────────────────────────────────────────────────
     waitlistPriority: { type: Number, default: null },
@@ -127,6 +134,8 @@ const BookingSchema = new mongoose.Schema(
       default: null,
     },
     collectedAt: { type: Date, default: null },
+    // How the attendant was paid at the pump: cash, or UPI scanned at the pump.
+    collectionMethod: { type: String, enum: ["cash", "upi", null], default: null },
     invoiceUrl:  { type: String },
     qrCodeData:  { type: String },
 
@@ -146,20 +155,17 @@ BookingSchema.index({ station: 1, bookingDate: 1, timeSlot: 1, status: 1 });
 BookingSchema.index({ station: 1, status: 1, bookingStartTime: 1, bookingEndTime: 1 });
 
 /**
- * Database-level double-booking guard, per fuel's nozzle.
- *
- * Bookings start only on 30-minute slot labels and no fill lasts that long
- * (enforced at boot by config/booking.js), so two active bookings on one
- * fuel's nozzle can only overlap by starting at the same instant. This index
- * makes that impossible to persist -- even if the application lock were
- * bypassed. Different fuels have separate nozzles, so a Petrol and a CNG
- * booking may start together. (Replaced the station-wide
- * uniq_active_nozzle_start: scripts/migrations/perFuelNozzleIndexes.js.)
+ * Database-level guard: two live bookings never share a start on the same
+ * app nozzle (resource) of a fuel. Overlap between different starts is
+ * prevented by the fuel's nozzle lock during allocation and a re-check after
+ * the write (services/booking/bookingCreate.js). Replaced
+ * uniq_active_nozzle_start_per_fuel, which allowed one booking per slot label
+ * (services/core/schedulingIndexes.js drops it).
  */
 BookingSchema.index(
-  { station: 1, fuelType: 1, bookingStartTime: 1 },
+  { station: 1, fuelType: 1, resource: 1, bookingStartTime: 1 },
   {
-    name: "uniq_active_nozzle_start_per_fuel",
+    name: "uniq_active_start_per_resource",
     unique: true,
     partialFilterExpression: {
       status: { $in: ["upcoming", "serving"] },
@@ -185,16 +191,16 @@ BookingSchema.index(
 );
 
 /**
- * Database-level "one car at each fuel's app nozzle" guard.
+ * Database-level "one car at each app nozzle" guard, per nozzle (resource).
  *
  * services/queue/nozzleService.js starts service under that fuel's nozzle
- * lock; this index makes a second "serving" booking for the same station and
- * fuel impossible to persist even if two servers, or an expired lock, race.
+ * lock; this index makes a second "serving" booking on the same nozzle
+ * impossible to persist even if two servers, or an expired lock, race.
  */
 BookingSchema.index(
-  { station: 1, fuelType: 1 },
+  { station: 1, fuelType: 1, resource: 1 },
   {
-    name: "uniq_serving_per_station_fuel",
+    name: "uniq_serving_per_resource",
     unique: true,
     partialFilterExpression: { status: "serving" },
   },
