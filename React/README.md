@@ -1,5 +1,11 @@
 # FuelMart — Smart Fuel & CNG Booking Platform
 
+## Problem Statement
+
+Drivers frequently face long, unpredictable wait times and queues at fuel and CNG stations, leading to wasted time, increased congestion, and frustration. Furthermore, customers often arrive at a station only to discover that their required fuel type is out of stock. On the operational side, station vendors struggle to manage traffic flow, real-time inventory, and bottlenecked queues during peak hours.
+
+There is a need for a smart, real-time booking platform that allows customers to check live station queues, verify fuel availability, pre-book their refueling slots, and process payments digitally. This streamlines the refueling experience, guaranteeing service for the customer while optimizing operations for the vendor.
+
 ## 1. Project overview
 
 FuelMart lets customers book a time slot to fuel up at a nearby petrol, diesel
