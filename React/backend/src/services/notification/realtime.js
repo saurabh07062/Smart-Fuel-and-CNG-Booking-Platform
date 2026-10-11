@@ -73,6 +73,11 @@ const EVENTS = {
   NOTIFICATION_CREATED: "notification:created",
   NEAREST_STATION_UPDATED: "nearestStation:updated",
   ADMIN_ACTIVITY: "admin:activity",
+  // Support chat (services/chat/notify.js decides who receives each one).
+  // No legacy alias: nothing shipped before these existed.
+  CHAT_MESSAGE: "chat:message",
+  CHAT_CONVERSATION: "chat:conversation",
+  CHAT_READ: "chat:read",
 };
 
 /** canonical -> the older name the shipped frontend still binds to. */

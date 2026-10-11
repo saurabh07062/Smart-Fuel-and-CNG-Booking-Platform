@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const { normalisePayMethod, payMethodLabel } = require("../services/payment/payMethod");
 const { fuelLabel, FUEL_LABELS } = require("../config/fuels");
+const { DATE_KEY, CLOCK, PIN, INDIAN_MOBILE, onWrite } = require("./shared/fieldValidators");
 
 /**
  * Booking / Order schema.
@@ -23,11 +24,21 @@ const { fuelLabel, FUEL_LABELS } = require("../config/fuels");
 const BookingSchema = new mongoose.Schema(
   {
     // ── Core Relations ──────────────────────────────────────────────────────
-    user:    { type: mongoose.Schema.Types.ObjectId, ref: "User",    required: true },
-    station: { type: mongoose.Schema.Types.ObjectId, ref: "Station" },
+    user:    { type: mongoose.Schema.Types.ObjectId, ref: "User",    required: true, index: true },
+    // Optional on purpose: a booking made before stations were separate rows
+    // has none, and refusing to load those would hide real history. Every
+    // booking the app creates today carries one (services/booking/bookingCreate.js).
+    station: { type: mongoose.Schema.Types.ObjectId, ref: "Station", index: true },
 
     // ── Admin Order ID ──────────────────────────────────────────────────────
-    orderId: { type: String, sparse: true },
+    // The reference a customer quotes and an invoice prints ("FM-2026-8F3A1C2B").
+    // Unique: two orders with the same number is an accounting problem, not a
+    // cosmetic one. Sparse, because older bookings were created without one.
+    // The unique index is declared below by name (uniq_booking_order_id): the
+    // collection already carries a non-unique "orderId_1" from before, and Mongo
+    // refuses to change an existing index in place -- declaring `unique` here
+    // would only ever log that conflict.
+    orderId: { type: String, trim: true, uppercase: true },
 
     // ── Fuel & Pricing ──────────────────────────────────────────────────────
     // One canonical label. Any casing a writer passes ("PETROL", "cng") is
@@ -38,16 +49,53 @@ const BookingSchema = new mongoose.Schema(
       enum: Object.values(FUEL_LABELS),
       set: (v) => fuelLabel(v) || v,
     },
-    quantity: { type: Number, required: true },
-    price:    { type: Number, required: true },   // price per unit (₹/L or ₹/kg)
-    taxes:    { type: Number, default: 0 },
-    amount:   { type: Number, required: true },   // total = price x quantity + taxes
+    // Money and volume are never negative, and a booking for nothing is not a
+    // booking. The figures themselves are the server's (services/booking/bookingCreate.js);
+    // these bounds are the floor under them.
+    quantity: { type: Number, required: true, min: 0.1 },
+    /**
+     * How the customer said "how much": in litres/kg, or in rupees.
+     *
+     * `quantity` above is what is actually booked, reserved from the tank and
+     * invoiced in BOTH cases -- an amount booking is converted to a quantity
+     * by the server, at the station's published price, before anything is
+     * written (services/booking/fuelAmount.js). These two fields exist so the
+     * receipt and the booking screens can say "booked for ₹1000 of Petrol"
+     * rather than quoting a figure the customer never typed.
+     */
+    bookedBy: { type: String, enum: ["quantity", "amount"], default: "quantity" },
+    /** The rupees asked for, when bookedBy is "amount". Null otherwise. */
+    requestedAmount: { type: Number, default: null, min: 0 },
+    price:    { type: Number, required: true, min: 0 },   // price per unit (₹/L or ₹/kg)
+    taxes:    { type: Number, default: 0, min: 0 },
+    amount:   { type: Number, required: true, min: 0 },   // total = price x quantity + taxes
+
+    // ── Reward points ───────────────────────────────────────────────────────
+    /**
+     * Points spent on this booking as a discount, and what they were worth.
+     *
+     * Both are the server's (services/rewards/rewardService.js) and both are
+     * kept even after the points are returned, because the receipt has to go
+     * on saying what the customer was charged. The ledger row with this
+     * booking's id is the authority on whether the points are still spent.
+     *
+     * `payableAmount` is what is collected at the pump: amount - rewardDiscount.
+     * It is a stored field rather than a computed one so that an invoice, a
+     * revenue total and a receipt printed months apart cannot disagree about
+     * it after a rate change.
+     */
+    rewardPointsUsed: { type: Number, default: 0, min: 0 },
+    rewardDiscount:   { type: Number, default: 0, min: 0 },
+    payableAmount:    { type: Number, default: null, min: 0 },
 
     // ── Slot ────────────────────────────────────────────────────────────────
-    bookingDate: { type: String, required: true }, // "YYYY-MM-DD" (India date)
-    timeSlot:    { type: String },                 // "10:00 AM"
-    startTime:   { type: String, default: null },  // "10:00"
-    endTime:     { type: String, default: null },  // "10:05"
+    // "YYYY-MM-DD" (India date). The shape is enforced because every query
+    // that groups or filters by day compares these as strings -- one row
+    // written "2026-9-5" would silently never match again.
+    bookingDate: { type: String, required: true, trim: true, match: DATE_KEY },
+    timeSlot:    { type: String, trim: true },      // "10:00 AM"
+    startTime:   { type: String, default: null, validate: onWrite("startTime", CLOCK, "startTime must be HH:MM") },  // "10:00"
+    endTime:     { type: String, default: null, validate: onWrite("endTime", CLOCK, "endTime must be HH:MM") },      // "10:05"
 
     // Precise single-nozzle reservation window (services/queue/nozzleScheduler.js).
     // UTC instants; the authoritative source for overlap checking.
@@ -60,12 +108,54 @@ const BookingSchema = new mongoose.Schema(
     // per-nozzle database guards below always apply to them.
     resource: { type: Number, default: 1, min: 1 },
 
+    // ── Fleet / multiple-vehicle booking ────────────────────────────────────
+    // A booking made as one of several, one per vehicle, in a single request
+    // (services/booking/fleetBooking.js). Null on every ordinary booking, and
+    // on every booking made before the feature existed.
+    //
+    // The member booking is a NORMAL booking in every other way: its own slot,
+    // nozzle, queue position, PIN, payment and status. The group only records
+    // that they were made together, so the customer can see and manage them as
+    // one -- and so each can still be cancelled on its own without touching the
+    // rest (models/FleetBooking.js).
+    fleetGroup: { type: mongoose.Schema.Types.ObjectId, ref: "FleetBooking", default: null, index: true },
+    /** 1..n, the order shown to the customer ("Vehicle 3 of 5"). */
+    fleetIndex: { type: Number, default: null, min: 1 },
+
     // ── Vehicle ─────────────────────────────────────────────────────────────
-    vehiclePlate:     { type: String },
+    vehiclePlate:     { type: String, trim: true, uppercase: true, maxlength: 20 },
+    /**
+     * The saved vehicle this booking is for, when it came from the customer's
+     * garage (User.vehicles). Advisory: a booking for an unsaved vehicle has
+     * none, and deleting the saved vehicle does not change the booking, which
+     * keeps its own plate snapshot.
+     */
+    vehicleRef:       { type: mongoose.Schema.Types.ObjectId, default: null },
+    /**
+     * The plate, normalised, as the uniqueness guard below compares it.
+     * Written by the booking service from vehiclePlate -- never by a client.
+     */
+    vehicleKey:       { type: String, trim: true, uppercase: true, maxlength: 20, default: null },
     // Snapshot of the vehicle chosen at booking time (services/booking/vehicleSnapshot.js).
     vehicleType:      { type: String, default: null }, // "Car" | "Bike" | "Scooter" | "Other"
     vehicleName:      { type: String, default: null }, // nickname, e.g. "My Car"
-    verificationCode: { type: String },
+    // The 4 digits the customer shows at the pump. Only valid once they have
+    // checked in at the station (controllers/bookingController.js).
+    verificationCode: { type: String, trim: true, match: PIN },
+
+    // ── Booked for someone else ─────────────────────────────────────────────
+    // A customer may reserve a slot for another person (a family member, a
+    // driver). The booking still belongs to `user` -- they own it, cancel it
+    // and pay for it -- but the attendant needs the name of whoever actually
+    // turns up with the vehicle, and that person's number to call.
+    // Absent on a booking for oneself.
+    bookedForName:  { type: String, default: null, trim: true, maxlength: 120 },
+    bookedForPhone: {
+      type: String,
+      default: null,
+      trim: true,
+      validate: onWrite("bookedForPhone", INDIAN_MOBILE, (p) => `"${p.value}" is not a 10-digit mobile number`),
+    },
 
     // ── Booking Status ──────────────────────────────────────────────────────
     // upcoming   → confirmed booking, not yet arrived
@@ -136,6 +226,11 @@ const BookingSchema = new mongoose.Schema(
     collectedAt: { type: Date, default: null },
     // How the attendant was paid at the pump: cash, or UPI scanned at the pump.
     collectionMethod: { type: String, enum: ["cash", "upi", null], default: null },
+    // "Check In at Petrol Pump" from the customer's app, at the station
+    // (services/booking/stationArrival.js): the order people reached the
+    // station in. Not the start of service -- that is the PIN (arrivalTime).
+    stationCheckInAt: { type: Date, default: null },
+    stationCheckInDistanceM: { type: Number, default: null },
     invoiceUrl:  { type: String },
     qrCodeData:  { type: String },
 
@@ -150,6 +245,31 @@ const BookingSchema = new mongoose.Schema(
 // ── Indexes ──────────────────────────────────────────────────────────────────
 // Slot availability check.
 BookingSchema.index({ station: 1, bookingDate: 1, timeSlot: 1, status: 1 });
+
+/**
+ * One order reference, one booking. Two orders sharing a number is an
+ * accounting problem, not a cosmetic one; services/booking/bookingCreate.js
+ * retries with a fresh id if it ever loses this race.
+ *
+ * Partial rather than sparse, so bookings created before order ids existed
+ * (which have none) do not all collide with each other on null.
+ */
+BookingSchema.index(
+  { orderId: 1 },
+  {
+    name: "uniq_booking_order_id",
+    unique: true,
+    partialFilterExpression: { orderId: { $type: "string" } },
+  },
+);
+
+/**
+ * Check-in at the pump: the attendant types 4 digits and the booking has to be
+ * found by code, for today, among the live ones. Without this index that read
+ * was a collection scan on every check-in -- the one query that happens with a
+ * customer standing at the window.
+ */
+BookingSchema.index({ verificationCode: 1, bookingDate: 1, status: 1 });
 
 // Per-fuel nozzle overlap check (services/queue/nozzleScheduler.js).
 BookingSchema.index({ station: 1, status: 1, bookingStartTime: 1, bookingEndTime: 1 });
@@ -175,20 +295,57 @@ BookingSchema.index(
 );
 
 /**
- * Database-level "one live booking per customer" guard.
+ * Database-level "one live ORDINARY booking per customer" guard.
  *
- * services/booking/bookingCreate.js checks this under the customer's lock; the index
- * makes it hold even if a lock expired, Redis failed over, or a second code
- * path writes a booking.
+ * services/booking/bookingCreate.js checks this under the customer's lock; the
+ * index makes it hold even if a lock expired, Redis failed over, or a second
+ * code path writes a booking.
+ *
+ * `fleetGroup: null` is what makes fleet booking possible without giving up
+ * the rule: a customer fuelling five vans holds five live bookings, and they
+ * are excluded here because each carries a group. Everything else -- including
+ * every booking written before fleet booking existed, which has no such field
+ * at all -- is still held to one at a time. (A partial filter on a null field
+ * matches both an explicit null and a missing field; verified against MongoDB
+ * before this was written.)
+ *
+ * The rule a fleet is held to instead is the next index: one live booking per
+ * vehicle. Five vans are five bookings; the same van twice is not.
  */
 BookingSchema.index(
   { user: 1 },
   {
-    name: "uniq_active_booking_per_user",
+    name: "uniq_active_solo_booking_per_user",
     unique: true,
-    partialFilterExpression: { status: { $in: ["upcoming", "serving", "waitlisted"] } },
+    partialFilterExpression: { status: { $in: ["upcoming", "serving", "waitlisted"] }, fleetGroup: null },
   },
 );
+
+/**
+ * One live booking per vehicle, per customer.
+ *
+ * The same van cannot hold two slots at once -- by accident (a double tap on
+ * Confirm), by a retried request, or by two servers racing. Scoped to the
+ * customer because a plate is not proof of ownership: two accounts entering
+ * the same plate is a support question, not something to refuse at 2 a.m.
+ *
+ * Only bookings that actually name a vehicle are covered; a booking made
+ * without a plate (which the single-booking flow still allows) is not.
+ */
+BookingSchema.index(
+  { user: 1, vehicleKey: 1 },
+  {
+    name: "uniq_active_booking_per_vehicle",
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ["upcoming", "serving", "waitlisted"] },
+      vehicleKey: { $type: "string" },
+    },
+  },
+);
+
+/** A group's member bookings, in the order the customer sees them. */
+BookingSchema.index({ fleetGroup: 1, fleetIndex: 1 });
 
 /**
  * Database-level "one car at each app nozzle" guard, per nozzle (resource).
@@ -217,6 +374,10 @@ BookingSchema.index({ station: 1, status: 1, createdAt: 1 });
 
 // Admin orders: filter by date range, newest first.
 BookingSchema.index({ bookingDate: 1, createdAt: -1 });
+
+// Revenue: completed, paid bookings of a station within a period
+// (services/payment/revenue.js), and the same query across all stations.
+BookingSchema.index({ station: 1, status: 1, paymentStatus: 1, completionTime: -1 });
 
 // Risk engine: a customer's recent self-cancellations.
 BookingSchema.index({ user: 1, cancelledBy: 1, cancelledAt: -1 });

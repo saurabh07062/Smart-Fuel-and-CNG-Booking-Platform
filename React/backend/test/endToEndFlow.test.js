@@ -26,6 +26,7 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const testDb = require("./helpers/testDb");
+const { arriveAtPump } = require("./helpers/arriveAtPump");
 const API = testDb.apiUrl();
 const MONGO = testDb.uri();
 
@@ -247,6 +248,8 @@ test("real flow: vendor -> station -> customer -> check-in -> completion", { tim
         events = null;
       }
 
+      // The customer arrives and checks in; only then does their code work.
+      await arriveAtPump(booking._id);
       const r = await call("POST", "/api/bookings/verify", vendorToken, { verificationCode: booking.verificationCode });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.booking.status, "serving");

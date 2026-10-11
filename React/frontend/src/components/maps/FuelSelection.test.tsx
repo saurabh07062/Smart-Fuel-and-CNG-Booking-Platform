@@ -22,13 +22,20 @@ describe("Dashboard fuel question", () => {
     expect(screen.queryByText(/what do you need/i)).toBeNull();
   });
 
-  it("is asked only after Use my location (GPS); a map click alone does not unlock it", () => {
+  it("is asked once a point is set, by GPS or by hand on the map", () => {
     view();
     expect(screen.queryByText(/what do you need/i)).toBeNull();
+
+    // A point the customer put on the map themselves is an answer to "where
+    // are you" -- it is how they search pumps in another area, or in another
+    // city when booking for someone else.
     act(() => useLocationStore.getState().setCoords(18.5721, 73.9842, "map"));
-    expect(screen.queryByText(/what do you need/i)).toBeNull();
+    expect(screen.getByText(/what do you need/i)).toBeTruthy();
+    expect(useLocationStore.getState().source).toBe("map");
+
     act(() => useLocationStore.getState().setCoords(18.5721, 73.9842, "gps"));
     expect(screen.getByText(/what do you need/i)).toBeTruthy();
+    expect(useLocationStore.getState().source).toBe("gps");
     expect(screen.getByRole("button", { name: /petrol/i })).toBeTruthy();
   });
 

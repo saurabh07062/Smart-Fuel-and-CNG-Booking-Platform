@@ -29,6 +29,16 @@ export const QUANTITY_DEFAULT = 5;
 export const QUANTITY_PRESETS = [5, 10, 15, 20];
 
 /**
+ * Handy figures for "₹X of fuel", the way a forecourt is actually used.
+ *
+ * Presets only -- any amount can be typed. What each one buys depends on the
+ * station's price, and the SERVER does that division when the booking is made
+ * (backend services/booking/fuelAmount.js); nothing here converts money to
+ * litres except as an on-screen estimate.
+ */
+export const AMOUNT_PRESETS = [200, 500, 1000, 2000];
+
+/**
  * Client-side FALLBACK service durations, used only to render a countdown for
  * an older booking whose document predates `serviceDurationSeconds`.
  *

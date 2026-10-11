@@ -115,8 +115,35 @@ function payMethodLabel(raw) {
   return LABELS[key] || LABELS[key.replace(/_/g, "")] || LABELS[normalisePayMethod(raw)];
 }
 
+/**
+ * What is actually collected for a booking, in rupees.
+ *
+ * `amount` is the bill; `payableAmount` is the bill after any reward-points
+ * discount (models/Booking.js). Every place that asks a customer for money --
+ * the pump QR, the attendant's screen, the payment check -- must use THIS, or
+ * a customer who spent points is asked for the full amount and the discount
+ * exists only on the receipt.
+ *
+ * Falls back to `amount` for the bookings made before points existed, which
+ * have no payableAmount, and whose bill was the full amount.
+ */
+function payableOf(booking) {
+  const raw = booking?.payableAmount;
+  // `Number(null)` is 0, and payableAmount DEFAULTS to null (models/Booking.js),
+  // so testing only `Number.isFinite` would read every booking made before this
+  // field existed as costing nothing -- a free fill, a ₹0 UPI QR, and an "amount
+  // mismatch" on every real payment. Absent is absent, and absent means the
+  // whole amount was owed.
+  if (raw !== null && raw !== undefined && raw !== "") {
+    const payable = Number(raw);
+    if (Number.isFinite(payable) && payable >= 0) return Math.round(payable * 100) / 100;
+  }
+  return Math.round((Number(booking?.amount) || 0) * 100) / 100;
+}
+
 module.exports = {
   PAY_METHODS: ["online", "station"],
+  payableOf,
   normalisePayMethod,
   isKnownPayMethod,
   initialPaymentStatus,

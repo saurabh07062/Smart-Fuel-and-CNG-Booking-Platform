@@ -64,6 +64,16 @@ async function completeBooking({ bookingId, fromStatuses = COMPLETABLE_STATUSES,
     metrics.inc("invoice_issue_error_count");
     console.error(`[completion] booking ${before._id} completed but its invoice was not issued:`, err.message);
   }
+  // Reward points are earned here, for the same reason stock leaves here: fuel
+  // has actually been dispensed. Once per booking, enforced by a unique index
+  // (models/RewardLedger.js), so the vendor's click and the sweep cannot both
+  // pay. Never fatal -- a points row must not undo a completion.
+  await require("../rewards/rewardService").earnForBooking(completed);
+  // FuelMart's commission on the sale, if the money was already taken. A
+  // pay-at-the-pump booking that finishes before its payment is recorded
+  // accrues when the payment is (services/commission/commissionService.js);
+  // whichever happens second does it, and the unique index means only once.
+  await require("../commission/commissionService").accrueForBooking(completed);
   return completed;
 }
 

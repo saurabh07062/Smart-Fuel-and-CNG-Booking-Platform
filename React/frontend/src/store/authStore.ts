@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { User } from "@/types";
 import { configureSession } from "@/services/api/apiClient";
+import { IS_NATIVE_BUILD } from "@/services/api/serverAddress";
 import { logoutRequest } from "@/services/api/authApi";
 import { disconnectSocket, getSocket } from "@/services/socket/socket";
 import { pushToast } from "./toastStore";
@@ -84,9 +85,19 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: "fm-auth",
-      // Per tab (sessionStorage): each tab can be signed in as a different
-      // account (utils/tabId.ts, backend services/security/session.js).
-      storage: createJSONStorage(() => sessionStorage),
+      /**
+       * Per tab (sessionStorage) on the web: each tab can be signed in as a
+       * different account (utils/tabId.ts, backend services/security/session.js).
+       *
+       * In the Android app, localStorage. The app is one "tab" whose session
+       * cookies Android keeps on disk, so the profile has to outlive the
+       * WebView too -- in sessionStorage it did not, and a restart dropped the
+       * signed-in person onto the login screen while their session was still
+       * perfectly valid. Still not a credential: useAuthBoot re-validates it
+       * against GET /api/auth/me on every start, and the cookies remain the
+       * only thing that authenticates anything.
+       */
+      storage: createJSONStorage(() => (IS_NATIVE_BUILD ? localStorage : sessionStorage)),
       // Only the profile is persisted -- it is not a credential. Whether the
       // session is still valid is asked of the server on every start
       // (hooks/useAuthBoot.ts), because the cookies cannot be read here.
@@ -103,9 +114,17 @@ configureSession({
 });
 
 
-// The profile used to be kept in localStorage, shared by every tab.
-try {
-  localStorage.removeItem("fm-auth");
-} catch {
-  /* storage blocked */
+/**
+ * The profile used to be kept in localStorage, shared by every tab. Cleaning up
+ * that leftover is for the WEBSITE only -- in the app, localStorage under this
+ * very key is where the profile now lives, and removing it here would wipe the
+ * signed-in person on every launch: exactly the restart-logs-me-out behaviour
+ * this change exists to fix.
+ */
+if (!IS_NATIVE_BUILD) {
+  try {
+    localStorage.removeItem("fm-auth");
+  } catch {
+    /* storage blocked */
+  }
 }

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
-import { avatarUrl } from "@/utils/avatar";
+import ConsoleAvatar from "./ConsoleAvatar";
 import { pushToast } from "@/store/toastStore";
 import { loginPathForRole } from "@/utils/authDestination";
 
@@ -9,6 +9,12 @@ export interface ConsoleTab<T extends string = string> {
   id: T;
   icon: string;
   label: string;
+  /**
+   * A count to show beside the label -- support conversations waiting for the
+   * team, say. Absent or 0 renders nothing: a "0" badge is noise that trains
+   * people to ignore the badge that matters.
+   */
+  badge?: number;
 }
 
 interface Props<T extends string> {
@@ -83,7 +89,17 @@ export default function ConsoleShell<T extends string>({
     <div className="vm">
       <div className="vm-shell">
         <aside className="vm-rail">
-          <button type="button" className="vm-logo" onClick={() => navigate("/")}>
+          {/* Named for the same reason as the nav: the text beside the mark is
+              hidden on a collapsed rail, and what this button does -- leave
+              the console for the public site -- is worth knowing before you
+              press it. */}
+          <button
+            type="button"
+            className="vm-logo"
+            onClick={() => navigate("/")}
+            aria-label={`${logoName}, ${logoSub} — go to the FuelMart home page`}
+            title="Go to the FuelMart home page"
+          >
             <span className="vm-logo-mark">
               <i className={`fas ${logoIcon}`} aria-hidden />
             </span>
@@ -101,16 +117,50 @@ export default function ConsoleShell<T extends string>({
                 className={`vm-nav-item ${activeTab === t.id ? "is-active" : ""}`}
                 onClick={() => onTabChange(t.id)}
                 aria-current={activeTab === t.id ? "page" : undefined}
+                /*
+                 * Named explicitly, because below the wide breakpoint the rail
+                 * collapses to icons: the label span goes display:none and the
+                 * icon is aria-hidden, which left every item in this nav with
+                 * no accessible name at all -- a screen reader announced
+                 * eleven buttons called "button". The label is also the
+                 * tooltip, so a sighted user with a collapsed rail can tell
+                 * the icons apart too.
+                 *
+                 * The badge is folded in rather than left to its own
+                 * aria-label: a name on the button replaces everything inside
+                 * it, so a separate one would simply go unread.
+                 */
+                aria-label={t.badge ? `${t.label}, ${t.badge} waiting` : t.label}
+                title={t.label}
               >
                 <i className={`fas ${t.icon}`} aria-hidden />
                 <span>{t.label}</span>
+                {Boolean(t.badge) && (
+                  <span className="vm-nav-badge" aria-hidden>
+                    {t.badge}
+                  </span>
+                )}
               </button>
             ))}
             {railExtra}
           </nav>
 
           <div className="vm-rail-foot">
-            <button type="button" className="vm-nav-item is-danger" onClick={handleLogout}>
+            {/* Vendors and admins hold other people's data, so the policy is
+                one click away for them too. */}
+            <Link to="/privacy" className="pp-link" style={{ display: "block", padding: "6px 14px" }}>
+              Privacy Policy
+            </Link>
+            <button
+              type="button"
+              className="vm-nav-item is-danger"
+              onClick={handleLogout}
+              /* "Logout", not "Log out": the accessible name has to contain
+                 the visible text, or voice control cannot act on what the
+                 user can read (WCAG 2.5.3, Label in Name). */
+              aria-label="Logout"
+              title="Logout"
+            >
               <i className="fas fa-right-from-bracket" aria-hidden />
               <span>Logout</span>
             </button>
@@ -135,7 +185,9 @@ export default function ConsoleShell<T extends string>({
                   <div className="vm-user-name">{user?.name ?? "Administrator"}</div>
                   <div className="vm-user-role">{userRole}</div>
                 </div>
-                <img src={avatarUrl(user)} alt="" className="vm-avatar" />
+                {/* The avatar is the photo control: click it to set, change
+                    or remove your own picture (ConsoleAvatar.tsx). */}
+                <ConsoleAvatar />
               </div>
             </div>
           </header>

@@ -5,6 +5,7 @@ import { useVendorStore } from "@/store/vendorStore";
 import { pushToast } from "@/store/toastStore";
 import { toApiError } from "@/services/api/apiClient";
 import { INVENTORY_TIER_CLASS } from "@/utils/vendorFormat";
+import StockDonut from "../StockDonut";
 import { VendorEmpty, VendorHeading } from "../VendorBits";
 import { istDateKey } from "@/utils/businessTime";
 
@@ -137,6 +138,8 @@ function InventoryItem({
   // The India date the delivery was ordered; lets the lead time be measured.
   const [orderedOn, setOrderedOn] = useState("");
   const [capacity, setCapacity] = useState("");
+  // Clearing this fuel's inventory: asked for twice, because it cannot be undone.
+  const [confirmReset, setConfirmReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<InventoryMovement[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -188,6 +191,22 @@ function InventoryItem({
     );
   };
 
+  const resetAll = async () => {
+    setBusy(true);
+    try {
+      const r = await api.resetInventory(stationId, fuel);
+      pushToast(r.msg || "Inventory cleared", "success");
+      setConfirmReset(false);
+      setHistory(null);
+      await onDone();
+      if (showHistory) await loadHistory();
+    } catch (err) {
+      pushToast(toApiError(err).msg, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveCapacity = () => {
     const value = parseFloat(capacity);
     if (!Number.isFinite(value) || value <= 0) {
@@ -205,22 +224,25 @@ function InventoryItem({
 
   return (
     <div className="vm-panel" style={{ padding: 16, marginBottom: 0 }}>
-      <div className="flex justify-between items-center mb-2">
-        <span className="text-sm font-bold">{name}</span>
-        <span
-          className={`px-2 py-0.5 rounded-full border ${INVENTORY_TIER_CLASS[tier] ?? ""} text-[9px] font-bold uppercase tracking-wider`}
-        >
-          {label}
-        </span>
-      </div>
-      <div className="flex justify-between items-end mb-2">
-        <span className="text-[11px] font-bold vm-text-muted">
-          <span className="vm-text">
-            {current} {unit}
+      {/* The ring reads the same figures as the bar below it. */}
+      <div className="flex items-start gap-3 mb-2">
+        <StockDonut fuel={fuel} percent={percent ?? null} tier={tier} label={`${name} stock`} />
+        <div className="min-w-0 flex-1">
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-sm font-bold">{name}</span>
+            <span
+              className={`px-2 py-0.5 rounded-full border ${INVENTORY_TIER_CLASS[tier] ?? ""} text-[9px] font-bold uppercase tracking-wider whitespace-nowrap`}
+            >
+              {label}
+            </span>
+          </div>
+          <span className="text-[11px] font-bold vm-text-muted">
+            <span className="vm-text">
+              {current} {unit}
+            </span>
+            {tank != null ? ` / ${tank} ${unit}` : " · tank capacity not set"}
           </span>
-          {tank != null ? ` / ${tank} ${unit}` : " · tank capacity not set"}
-        </span>
-        {percent != null && <span className="text-[11px] vm-text-muted">{percent}%</span>}
+        </div>
       </div>
       <div className="h-2 w-full vm-bg-surface rounded-full overflow-hidden mb-2">
         {percent != null && (
@@ -297,10 +319,51 @@ function InventoryItem({
         </button>
       </div>
 
-      <button type="button" className="vm-link text-xs mt-3" onClick={toggleHistory} aria-expanded={showHistory}>
+      {confirmReset ? (
+        <div className="mt-3 rounded-lg border border-red-700 bg-red-900/20 p-3" role="alertdialog" aria-label={`Clear ${name} inventory`}>
+          <p className="text-[12px] font-bold text-red-300">Clear all {name} inventory?</p>
+          <p className="text-[11px] vm-text-muted mt-1">
+            The stock ({current} {unit}), the tank capacity and every stock-history entry for {name} at this station are
+            deleted. This cannot be undone, and past deliveries and sales disappear from the history and the demand
+            forecast. Other fuels are not touched.
+          </p>
+          <div className="flex gap-2 mt-3">
+            <button
+              type="button"
+              onClick={() => setConfirmReset(false)}
+              disabled={busy}
+              className="vm-bg-surface vm-hover border vm-border vm-text font-bold px-3 py-1.5 rounded-lg text-xs transition-colors"
+            >
+              Keep it
+            </button>
+            <button
+              type="button"
+              onClick={() => void resetAll()}
+              disabled={busy}
+              className="bg-red-600 hover:bg-red-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-60"
+              data-testid={`reset-confirm-${fuel}`}
+            >
+              {busy ? "Clearing…" : "Yes, clear everything"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex items-center gap-4 mt-3">
+      <button type="button" className="vm-link text-xs" onClick={toggleHistory} aria-expanded={showHistory}>
         <i className={`fas ${showHistory ? "fa-chevron-up" : "fa-clock-rotate-left"}`} aria-hidden />{" "}
         {showHistory ? "Hide history" : "Stock history"}
       </button>
+      <button
+        type="button"
+        className="text-xs text-red-400 hover:text-red-300 font-bold transition-colors ml-auto"
+        onClick={() => setConfirmReset(true)}
+        disabled={busy}
+        data-testid={`reset-inventory-${fuel}`}
+      >
+        <i className="fas fa-trash-can" aria-hidden /> Reset inventory
+      </button>
+      </div>
       {showHistory && (
         <div className="mt-2 space-y-1.5">
           {history === null ? (

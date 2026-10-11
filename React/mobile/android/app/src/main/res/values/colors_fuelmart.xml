@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- FuelMart brand red, the same accent the app uses. -->
+    <!--
+      FuelMart brand green: the same accent the customer app uses
+      (frontend/src/styles/customer.css, data-accent="green").
+      The launcher icon, the splash and the system bars all read from here,
+      so the app looks like itself from the home screen onward.
+    -->
+    <color name="fuelmart_green">#1A8F4A</color>
+    <color name="fuelmart_green_dark">#137239</color>
+
+    <!-- Kept so any older reference still resolves; nothing brand-facing uses them. -->
     <color name="fuelmart_red">#E23744</color>
     <color name="fuelmart_red_dark">#B5202E</color>
 </resources>

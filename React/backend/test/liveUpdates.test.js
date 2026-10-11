@@ -312,7 +312,7 @@ test("live updates reach every screen without a refresh", async (t) => {
     await scenario(
       "vendor collects payment at the pump -> customer sees PAID, admin revenue",
       async () => {
-        const r = await call("PATCH", `/api/vendor-panel/stations/${S}/bookings/${b3}/collect`, vt);
+        const r = await call("PATCH", `/api/vendor-panel/stations/${S}/bookings/${b3}/collect`, vt, { method: "cash" });
         assert.equal(r.status, 200, JSON.stringify(r.body));
       },
       {

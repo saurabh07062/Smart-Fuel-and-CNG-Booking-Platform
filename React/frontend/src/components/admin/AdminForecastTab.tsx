@@ -4,6 +4,7 @@ import type { AdminAnalytics } from "@/services/api/adminApi";
 import { toApiError } from "@/services/api/apiClient";
 import { ConsoleLoading } from "@/components/console/ConsoleBits";
 import { formatINR } from "@/utils/vendorFormat";
+import DataTable from "@/components/common/DataTable";
 
 const METHOD_LABEL: Record<string, string> = {
   "moving-average": "Average of complete months",
@@ -157,32 +158,32 @@ export default function AdminForecastTab() {
 
         <section className="vm-panel" style={{ padding: 22, marginBottom: 0 }}>
           <h3 className="text-lg font-bold mb-4">Completed sales by fuel</h3>
-          {data.byFuel.length === 0 ? (
-            <p className="vm-text-muted text-sm">No completed sales yet.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="vm-text-muted text-left text-xs uppercase">
-                  <th className="py-2 pr-3">Fuel</th>
-                  <th className="py-2 pr-3 text-right">Volume</th>
-                  <th className="py-2 pr-3 text-right">Sales</th>
-                  <th className="py-2 text-right">Revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.byFuel.map((row) => (
-                  <tr key={row.fuelType} className="border-t vm-border">
-                    <td className="py-2 pr-3 font-bold">{row.fuelType}</td>
-                    <td className="py-2 pr-3 text-right font-mono">
-                      {row.volume} {row.fuelType === "CNG" ? "kg" : "L"}
-                    </td>
-                    <td className="py-2 pr-3 text-right">{row.bookings}</td>
-                    <td className="py-2 text-right font-mono">{formatINR(row.revenue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <DataTable
+            label="Completed sales by fuel"
+            rows={data.byFuel}
+            rowKey={(row) => row.fuelType}
+            empty="No completed sales yet."
+            columns={[
+              { key: "fuel", header: "Fuel", cell: (row) => <span className="font-bold">{row.fuelType}</span> },
+              {
+                key: "volume",
+                header: "Volume",
+                align: "right",
+                cell: (row) => (
+                  <span className="font-mono">
+                    {row.volume} {row.fuelType === "CNG" ? "kg" : "L"}
+                  </span>
+                ),
+              },
+              { key: "sales", header: "Sales", align: "right", cell: (row) => row.bookings },
+              {
+                key: "revenue",
+                header: "Revenue",
+                align: "right",
+                cell: (row) => <span className="font-mono">{formatINR(row.revenue)}</span>,
+              },
+            ]}
+          />
         </section>
       </div>
     </div>

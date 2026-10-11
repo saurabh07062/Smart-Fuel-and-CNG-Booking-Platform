@@ -20,6 +20,7 @@ const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 
 const API = require("./helpers/testDb").apiUrl();
+const { arriveAtPump } = require("./helpers/arriveAtPump");
 const MONGO = require("./helpers/testDb").uri();
 
 async function ping() {
@@ -215,6 +216,8 @@ test("booking integrity through POST /api/bookings", async (t) => {
         verificationCode: "4821",
         status: "upcoming",
       });
+      // The code only works once the customer has checked in at the pump.
+      await arriveAtPump(todays._id);
 
       assert.equal((await call("POST", "/api/bookings/verify", null, { verificationCode: "4821" })).status, 401, "anonymous");
       assert.equal((await call("POST", "/api/bookings/verify", tokenFor(customers[0]), { verificationCode: "4821" })).status, 403, "a customer");
@@ -230,8 +233,10 @@ test("booking integrity through POST /api/bookings", async (t) => {
       const checkedIn = await Booking.findById(todays._id);
       assert.equal(checkedIn.status, "serving", "scanning at the pump is the check-in: fueling starts");
       assert.ok(checkedIn.arrivalTime && checkedIn.fuelingStartTime);
-      assert.equal(checkedIn.paymentStatus, "paid");
-      assert.equal(String(checkedIn.collectedBy), String(vendor._id));
+      // Check-in is not the payment: the attendant records it afterwards,
+      // saying whether it was cash or UPI (vendorPanelController.collectBookingPayment).
+      assert.equal(checkedIn.paymentStatus, "due_at_station");
+      assert.equal(checkedIn.collectedBy, null);
       assert.equal(
         (await Station.findById(station._id).lean()).inventory.petrol,
         petrolBefore,

@@ -71,6 +71,7 @@ test("concurrent PIN check-ins through the API", async (t) => {
     inventory: { petrol: 1000 },
   });
   const LABELS = ["8:00 PM", "8:30 PM", "9:00 PM", "9:30 PM", "7:30 PM", "7:00 PM"];
+  const ARRIVED_AT = new Date();
   const token = jwt.sign({ user: { id: String(vendor._id) } }, process.env.JWT_SECRET, { expiresIn: "10m" });
   const scan = (bookingId) =>
     fetch(`${API}/api/bookings/verify`, {
@@ -95,6 +96,11 @@ test("concurrent PIN check-ins through the API", async (t) => {
       payMethod: "station",
       paymentStatus: "due_at_station",
       status: "upcoming",
+      // All five reached the pump at the same instant: the attendant's code
+      // needs a check-in, and an identical time means nobody is "earlier",
+      // which is exactly the race this test is about.
+      stationCheckInAt: ARRIVED_AT,
+      stationCheckInDistanceM: 0,
     });
   };
   const count = (status) => Booking.countDocuments({ station: station._id, status });

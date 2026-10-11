@@ -39,6 +39,7 @@ const { getServiceDurationSeconds } = require("../../config/fuelDurations");
 const { FUEL_KEYS, normaliseFuel, fuelLabel, fuelUnit } = require("../../config/fuels");
 const { SLOT_SPACING_SECONDS } = require("../../config/booking");
 const { startOfBusinessDay, endOfBusinessDay, dateKey } = require("../../config/businessTime");
+const { formatWait, formatClock } = require("./queueInfo");
 
 const LINE_STATUSES = ["upcoming", "serving"];
 const BASIS = "app-nozzle";
@@ -501,7 +502,18 @@ async function buildQueuePreview({ stationId, fuelType, quantity, slotStart = nu
     queueLength: line.queueLength,
     waitMinutes: line.waitMinutes,
     queue,
-    you: { quantity, serviceSeconds, ...you },
+    you: {
+      quantity,
+      serviceSeconds,
+      ...you,
+      // The same five figures, and names, as a booked vehicle's queueInfo
+      // (services/queue/queueInfo.js).
+      vehicleCountAhead: you.vehiclesAhead,
+      queuePosition: you.position,
+      expectedWaitingSeconds: you.estimatedWaitSeconds,
+      expectedWaitingTime: formatWait(you.estimatedWaitSeconds),
+      estimatedStartTime: formatClock(you.estimatedStartAt),
+    },
     // The scheduler's summary for the chosen window (null without one).
     schedule: schedule
       ? {

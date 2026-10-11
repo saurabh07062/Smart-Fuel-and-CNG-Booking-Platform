@@ -26,6 +26,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true
 
 const mongoose = require("mongoose");
 const testDb = require("./helpers/testDb");
+const { arriveAtPump } = require("./helpers/arriveAtPump");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -145,6 +146,7 @@ test("refueling flow against MongoDB", async (t) => {
         assert.equal(wrong.status, 404);
         assert.equal((await reload(booking._id)).status, "upcoming");
 
+        await arriveAtPump(booking._id);
         const r = await call("POST", "/api/bookings/verify", tokenFor(vendor._id), { verificationCode: code });
         assert.equal(r.status, 200, JSON.stringify(r.body));
         assert.equal(r.body.started, true);

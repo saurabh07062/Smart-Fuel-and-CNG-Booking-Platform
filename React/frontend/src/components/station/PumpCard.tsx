@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useBookingMode } from "@/hooks/useBookingMode";
 import type { NearbyStation } from "@/types";
 import { directionsUrl } from "@/utils/navigation";
 import { distanceNote } from "@/utils/distanceNote";
@@ -35,6 +36,7 @@ function waitBucket(mins: number) {
  */
 export default function PumpCard({ station: st, fuelType, isPrimary = false }: Props) {
   const navigate = useNavigate();
+  const { ask, sheet } = useBookingMode();
   // Same navigation link as every other Directions button (utils/navigation.ts);
   // it used to open a map search here, and "null,null" for a station with no position.
   const directions = directionsUrl(st.latitude, st.longitude);
@@ -66,19 +68,27 @@ export default function PumpCard({ station: st, fuelType, isPrimary = false }: P
   };
 
   const book = () => {
+    // The same query this card has always built for the single-vehicle flow,
+    // handed to the one-or-several question instead of straight to the router.
     const params = new URLSearchParams({
-      stationId: st.stationId,
       stationName: st.stationName,
       fuelType,
       step: "1",
       ...(st._fuelPriceForDisplay != null ? { price: String(st._fuelPriceForDisplay) } : {}),
       ...(bookingSlot ? { timeSlot: bookingSlot } : {}),
     });
-    navigate(`/booking?${params.toString()}`);
+    ask({
+      stationId: st.stationId,
+      stationName: st.stationName,
+      singleQuery: params.toString(),
+      fuelType,
+    });
   };
 
   return (
-    <article className={`cx-panel ${isPrimary ? "cx-pump-primary" : ""}`}>
+    <>
+      {sheet}
+      <article className={`cx-panel ${isPrimary ? "cx-pump-primary" : ""}`}>
       <div className="cx-panel-body">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-start gap-3 min-w-0">
@@ -209,5 +219,6 @@ export default function PumpCard({ station: st, fuelType, isPrimary = false }: P
         </button>
       </div>
     </article>
+    </>
   );
 }

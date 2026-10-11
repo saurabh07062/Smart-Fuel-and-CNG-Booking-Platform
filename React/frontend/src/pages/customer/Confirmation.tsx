@@ -7,8 +7,11 @@ import EmptyState from "@/components/common/EmptyState";
 import RouteMap from "@/components/maps/RouteMap";
 import ServiceCountdown from "@/components/booking/ServiceCountdown";
 import BookingQrCard from "@/components/booking/BookingQrCard";
+import { serverBase } from "@/services/api/serverAddress";
 import CancelBookingSheet from "@/components/booking/CancelBookingSheet";
 import BookingTimeline, { timelineStep } from "@/components/booking/BookingTimeline";
+import QueueInfoCard from "@/components/booking/QueueInfoCard";
+import StationCheckInCard from "@/components/booking/StationCheckInCard";
 import UpiPaymentCard from "@/components/booking/UpiPaymentCard";
 import { useBookingStore } from "@/store/bookingStore";
 import { useStationStore } from "@/store/stationStore";
@@ -252,6 +255,10 @@ export default function Confirmation() {
   // older bookings only ever had the plate, and some have neither.
   const vehicle = [b.vehicleName, b.vehiclePlate].filter(Boolean).join(" · ") || "Not recorded";
   const vehicleIcon = getVehicleIcon(b.vehicleType || "Car");
+  // Set only when the customer booked the slot for another person.
+  const bookedFor = b.bookedForName
+    ? [b.bookedForName, b.bookedForPhone].filter(Boolean).join(" · ")
+    : null;
   const amount = b.amount ?? 0;
   const payment = paymentState(b);
 
@@ -309,6 +316,7 @@ export default function Confirmation() {
                 { label: "Fuel Type", value: fuelType, icon: "fa-droplet" },
                 { label: "Quantity", value: `${qty} Litres`, icon: "fa-gauge" },
                 { label: "Vehicle", value: vehicle, icon: vehicleIcon },
+                ...(bookedFor ? [{ label: "Coming to the pump", value: bookedFor, icon: "fa-user-group" }] : []),
                 { label: "Payment", value: payment.label, icon: "fa-wallet" },
               ]}
             />
@@ -322,7 +330,18 @@ export default function Confirmation() {
             {invoice && (
               <a
                 className="btn btn-primary btn-block col-span-2"
-                href={`/api/invoices/${bookingId}?print=1`}
+                /*
+                 * An ABSOLUTE address, not "/api/...".
+                 *
+                 * On the website the two are the same thing. In the Android
+                 * app they are not: its pages are files inside the APK, so a
+                 * root-relative link resolves against the device, not against
+                 * FuelMart, and "Download Invoice" opened nothing at all.
+                 * `serverBase()` is the same origin every API call uses
+                 * (services/api/serverAddress.ts) -- empty on the web, the
+                 * configured server in the app -- so one href is right in both.
+                 */
+                href={`${serverBase()}/api/invoices/${bookingId}?print=1`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -407,6 +426,7 @@ export default function Confirmation() {
                   { label: "Fuel Type", value: fuelType, icon: "fa-droplet" },
                   { label: "Quantity", value: `${qty} Litres`, icon: "fa-gauge" },
                   { label: "Vehicle", value: vehicle, icon: vehicleIcon },
+                ...(bookedFor ? [{ label: "Coming to the pump", value: bookedFor, icon: "fa-user-group" }] : []),
                   { label: "Amount", value: formatCurrency(amount), icon: "fa-receipt" },
                   { label: "Payment", value: payment.label, icon: "fa-wallet" },
                 ]}
@@ -451,6 +471,7 @@ export default function Confirmation() {
                   { label: "Fuel Type", value: fuelType, icon: "fa-droplet" },
                   { label: "Quantity", value: `${qty} Litres`, icon: "fa-gauge" },
                   { label: "Vehicle", value: vehicle, icon: vehicleIcon },
+                ...(bookedFor ? [{ label: "Coming to the pump", value: bookedFor, icon: "fa-user-group" }] : []),
                   { label: "Payment", value: "At the station, if you get the slot", icon: "fa-wallet" },
                 ]}
               />
@@ -555,7 +576,14 @@ export default function Confirmation() {
               )}
             </div>
             <div className="cx-panel-body">
+              {/* Today only: the server refuses another day's check-in anyway. */}
+              {date === istDateKey() && <StationCheckInCard booking={b} />}
               <BookingTimeline step={timelineStep(b, leaveNow)} />
+              {b.queueInfo && (
+                <div className="mb-4">
+                  <QueueInfoCard info={b.queueInfo} />
+                </div>
+              )}
               {turnMinutes !== null && (
                 <div className="cx-status-banner t-good mb-3" role="status" aria-live="polite">
                   <span className="cx-stat-icon">
@@ -717,6 +745,7 @@ export default function Confirmation() {
                   { label: "Booking Status", value: statusLabel, icon: "fa-circle-info" },
                   { label: "Quantity", value: `${qty} Litres`, icon: "fa-gauge" },
                   { label: "Vehicle", value: vehicle, icon: vehicleIcon },
+                ...(bookedFor ? [{ label: "Coming to the pump", value: bookedFor, icon: "fa-user-group" }] : []),
                 ]}
               />
               <hr className="cx-split" />

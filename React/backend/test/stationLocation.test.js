@@ -46,6 +46,7 @@ test("station location persistence against MongoDB", async (t) => {
   const base = `http://127.0.0.1:${server.address().port}`;
 
   const tag = `stationloc-${Date.now()}`;
+  let phoneSeq = 0;
   const tokenFor = (id) =>
     jwt.sign({ user: { id: String(id) } }, process.env.JWT_SECRET, { algorithm: "HS256", expiresIn: "30m" });
   const call = async (method, route, { token, body } = {}) => {
@@ -63,7 +64,14 @@ test("station location persistence against MongoDB", async (t) => {
         email: `${tag}-${suffix}@example.com`,
         password: "Vendor@12345",
         businessName: `${tag} ${suffix} Fuels`,
-        phone: "9000000000",
+        // A phone number is one vendor's (controllers/vendorController.js
+        // refuses a second registration on the same number), so each vendor in
+        // this file registers with its own.
+        // "98" first, deliberately: validatePhone strips a leading country
+        // code, and "91" is one -- a generated number that happened to begin
+        // 91 lost two digits and was refused as "not exactly 10 digits",
+        // which made this file fail about one run in ten.
+        phone: `98${String(Date.now()).slice(-5)}${String(phoneSeq++).padStart(3, "0")}`.slice(0, 10),
         vendorAddress: "Location Test Road, Pune",
         products: "petrol,diesel,cng",
         ...extra,

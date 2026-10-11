@@ -71,28 +71,49 @@ exports.register = async (req, res) => {
       });
     }
 
-    console.log(`[Register] Checking if email exists: ${email}`);
     let user = await findUserByEmail(email);
     if (user) {
-      console.log(`[Register] ❌ Email already registered: ${email}`);
       return res.status(400).json({ msg: `User already exists with email: ${email}` });
     }
-    console.log(`[Register] ✅ Email is free, creating user...`);
 
     user = new User({ name, email, password, isVerified: true });
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
     await user.save();
-    console.log(`[Register] ✅ User SAVED to DB — ID: ${user._id} | Email: ${user.email}`);
+    // One line, through the logger that masks the address -- the same way a
+    // sign-in is recorded (below). The four console.log lines that used to be
+    // here printed the customer's email address to stdout four times per
+    // registration, which puts personal data in every log file and every
+    // terminal scrollback that has ever run this server.
+    authLog.info("Account created", { userId: String(user._id), email: user.email, client: clientKind(req), ip: req.ip });
+
+    // The welcome reward points, as a real ledger entry rather than a number
+    // that appears on the dashboard from nowhere
+    // (services/rewards/rewardService.js). Never fatal: an account is created
+    // either way, and the credit is not retried silently.
+    const welcome = await require("../services/rewards/rewardService").creditWelcome(user._id);
+    if (welcome) user.rewards = welcome.balance;
 
     // The session arrives as httpOnly cookies (services/security/session.js),
     // never in the body. Signing is synchronous inside this try: a failure is
     // a 500 for this request, never a crash of the whole process.
     await issueSession(req, res, user);
-    res.json({
-      msg: "Account created successfully!",
-      user: { name: user.name, email: user.email, wallet: user.wallet, rewards: user.rewards, vehicles: user.vehicles },
-    });
+    /**
+     * The SAME user shape every other auth response returns.
+     *
+     * This used to hand-roll its own object -- name, email, wallet, rewards,
+     * vehicles -- and leave out `id` and, critically, `role`. A new account is
+     * signed in immediately, so the client routed straight to the dashboard
+     * with a user whose role was `undefined`; the role gate let nobody with no
+     * role through and redirected to the same address, which loops and paints
+     * nothing. In the Android app that is a white screen with no console to
+     * look at.
+     *
+     * One function (sessionUserView) for login, registration and session
+     * refresh, so a response that signs someone in can never again describe
+     * them differently from one that keeps them signed in.
+     */
+    res.json({ msg: "Account created successfully!", user: sessionUserView(user) });
   } catch (err) {
     console.error(`[Register] ❌ Error saving user:`, err.message);
     // Handle duplicate key error (email already exists in DB)

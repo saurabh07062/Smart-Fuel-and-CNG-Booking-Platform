@@ -22,6 +22,7 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
 const testDb = require("./helpers/testDb");
+const { arriveAtPump } = require("./helpers/arriveAtPump");
 const API = testDb.apiUrl();
 const MONGO = testDb.uri();
 
@@ -163,6 +164,9 @@ test("booking -> payment -> revenue, end to end", { timeout: 240_000 }, async (t
     });
 
     await t.test("fuelled but not collected: completed, still owed, not revenue", async () => {
+      // The customer has to be at the pump before fuelling can start
+      // (NOT_CHECKED_IN); test/helpers/arriveAtPump.js is that step.
+      await arriveAtPump(A._id);
       const start = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${A._id}/status`, vt, { status: "serving" });
       assert.equal(start.status, 200, JSON.stringify(start.body));
       const done = await waitFor(async () => {
@@ -180,7 +184,7 @@ test("booking -> payment -> revenue, end to end", { timeout: 240_000 }, async (t
     });
 
     await t.test("recording the payment makes it revenue once, live to customer and vendor", async () => {
-      const collect = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${A._id}/collect`, vt);
+      const collect = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${A._id}/collect`, vt, { method: "cash" });
       assert.equal(collect.status, 200, JSON.stringify(collect.body));
       assert.equal(collect.body.alreadyPaid, false);
       const stored = await Booking.findById(A._id).lean();
@@ -198,7 +202,7 @@ test("booking -> payment -> revenue, end to end", { timeout: 240_000 }, async (t
       assert.deepEqual(r.awaitingCollection, { count: 0, amount: 0 });
       assert.equal(r.fuelSales.Petrol.quantity, 1);
 
-      const again = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${A._id}/collect`, vt);
+      const again = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${A._id}/collect`, vt, { method: "cash" });
       assert.equal(again.status, 200);
       assert.equal(again.body.alreadyPaid, true);
       const r2 = await vendorRevenue();
@@ -207,15 +211,19 @@ test("booking -> payment -> revenue, end to end", { timeout: 240_000 }, async (t
     });
 
     let B;
-    await t.test("a PIN check-in takes the payment, and counts as revenue only once the fill completes", async () => {
+    await t.test("the attendant records the payment; it counts as revenue only once the fill completes", async () => {
       const r = await call("POST", "/api/bookings", tokenFor(cB._id), {
         stationId, fuelType: "Diesel", quantity: 1, bookingDate: dateKey(), timeSlot: dieselSlot, payMethod: "station",
       });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       B = r.body.booking;
+      await arriveAtPump(B._id);
       const scan = await call("POST", "/api/bookings/verify", vt, { verificationCode: B.verificationCode });
       assert.equal(scan.status, 200, JSON.stringify(scan.body));
-      assert.equal(scan.body.booking.paymentStatus, "paid");
+      // The scan starts the fill; the attendant then records how it was paid.
+      assert.equal(scan.body.booking.paymentStatus, "due_at_station");
+      const took = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${B._id}/collect`, vt, { method: "upi" });
+      assert.equal(took.status, 200, JSON.stringify(took.body));
 
       const whileFuelling = await vendorRevenue();
       assert.equal(whileFuelling.todaysRevenue, expected, "a fill still in progress is not revenue yet");
@@ -238,7 +246,7 @@ test("booking -> payment -> revenue, end to end", { timeout: 240_000 }, async (t
       assert.equal(r.status, 200, JSON.stringify(r.body));
       const cancel = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${r.body.booking._id}/status`, vt, { status: "cancelled" });
       assert.equal(cancel.status, 200, JSON.stringify(cancel.body));
-      const notCollectable = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${r.body.booking._id}/collect`, vt);
+      const notCollectable = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${r.body.booking._id}/collect`, vt, { method: "cash" });
       assert.equal(notCollectable.status, 409, "a cancelled booking cannot be collected");
       const rev = await vendorRevenue();
       assert.equal(rev.todaysRevenue, expected);
@@ -252,7 +260,7 @@ test("booking -> payment -> revenue, end to end", { timeout: 240_000 }, async (t
         status: "completed", completionTime: new Date(),
       });
       const results = await Promise.all(
-        Array.from({ length: 5 }, () => call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${D._id}/collect`, vt)),
+        Array.from({ length: 5 }, () => call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${D._id}/collect`, vt, { method: "cash" })),
       );
       assert.ok(results.every((r) => r.status === 200), JSON.stringify(results.map((r) => r.status)));
       assert.equal(results.filter((r) => r.body.alreadyPaid === false).length, 1, "exactly one request recorded it");

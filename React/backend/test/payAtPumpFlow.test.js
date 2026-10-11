@@ -22,6 +22,7 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
 const testDb = require("./helpers/testDb");
+const { arriveAtPump } = require("./helpers/arriveAtPump");
 const API = testDb.apiUrl();
 const MONGO = testDb.uri();
 
@@ -173,18 +174,33 @@ test("booking -> pay at the petrol pump -> completion", { timeout: 180_000 }, as
       assert.equal(row.paymentStatus, "due_at_station");
     });
 
-    await t.test("PIN check-in at the pump collects the payment and starts fueling", async () => {
+    await t.test("PIN check-in starts fueling; the payment is still owed", async () => {
+      await arriveAtPump(booking._id);
       const r = await call("POST", "/api/bookings/verify", vendorToken, { verificationCode: booking.verificationCode });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.booking.status, "serving");
-      assert.equal(r.body.booking.paymentStatus, "paid");
+      assert.equal(r.body.booking.paymentStatus, "due_at_station", "the scan is not the payment");
+
+      const db = await Booking.findById(booking._id).lean();
+      assert.equal(db.collectedBy, null);
+      assert.equal((await Station.findById(stationId).lean()).inventory.petrol, 5000, "no fuel leaves the tank before fueling completes");
+    });
+
+    await t.test("the attendant records how it was paid, and only then is it paid", async () => {
+      // The method is required: nothing is recorded without it.
+      const missing = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${booking._id}/collect`, vendorToken, {});
+      assert.equal(missing.status, 400);
+      assert.equal((await Booking.findById(booking._id).lean()).paymentStatus, "due_at_station");
+
+      const ok = await call("PATCH", `/api/vendor-panel/stations/${stationId}/bookings/${booking._id}/collect`, vendorToken, { method: "cash" });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
 
       const db = await Booking.findById(booking._id).lean();
       assert.equal(db.paymentStatus, "paid");
+      assert.equal(db.collectionMethod, "cash");
       assert.equal(String(db.collectedBy), String(vendor._id), "collected by the attendant's account");
       assert.ok(db.collectedAt instanceof Date);
       assert.equal(db.amount, 1020, "the amount collected is the booked amount");
-      assert.equal((await Station.findById(stationId).lean()).inventory.petrol, 5000, "no fuel leaves the tank before fueling completes");
     });
 
     await t.test("fueling completes on its own; the booking stays paid; stock is deducted once", async () => {

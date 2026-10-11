@@ -17,12 +17,18 @@ const auth = require("../middleware/auth");
 const adminAuth = require("../middleware/admin");
 const Station = require("../models/Station");
 const Booking = require("../models/Booking");
+// Registers the model so `.populate("fleetGroup")` below can resolve it.
+// Mongoose looks a populated model up by name at query time, and a name is
+// only registered by requiring the file that defines it -- a controller that
+// imports its models one by one has to import this one too.
+require("../models/FleetBooking");
 const User = require("../models/User");
 const { forecastFromHistory } = require("../services/algorithms/forecast");
 const { salesHistory } = require("../services/inventory/demandHistory");
 const { predictWait } = require("../services/algorithms/queue");
 const revenueService = require("../services/payment/revenue");
-const { dateKey, MONGO_TIMEZONE } = require("../config/businessTime");
+const { dateKey, MONGO_TIMEZONE, startOfBusinessDay, startOfBusinessMonth } = require("../config/businessTime");
+const mongoose = require("mongoose");
 
 /**
  * GET /api/superadmin/dashboard
@@ -44,6 +50,7 @@ router.get("/dashboard", adminAuth, async (_req, res) => {
       statusRows,
       customerRevenue,
       money,
+      weeksThisMonth,
       bookingsToday,
       byHourRows,
       stockStations,
@@ -59,6 +66,9 @@ router.get("/dashboard", adminAuth, async (_req, res) => {
       // counted out (services/inventory/demandHistory.js). Totals stay money collected.
       salesHistory({ metric: "revenue", customersOnly: true }),
       revenueService.revenueSummary(),
+      // This month split into weeks: the trend an admin standing in the
+      // current month can actually act on (services/payment/revenue.js).
+      revenueService.revenueWeeksThisMonth(),
       Booking.countDocuments({ bookingDate: today }),
       // Today's bookings by the India hour their slot starts.
       Booking.aggregate([
@@ -128,6 +138,7 @@ router.get("/dashboard", adminAuth, async (_req, res) => {
         basis: money.basis,
         asOf: money.asOf,
         monthly: revenueMonths(revenue, 6),
+        weeksThisMonth,
         // Gated on how much customer history exists (services/algorithms/forecast.js).
         forecastNextMonth: forecastFromHistory(customerRevenue),
         history: revenueEvidence(customerRevenue),
@@ -136,6 +147,350 @@ router.get("/dashboard", adminAuth, async (_req, res) => {
   } catch (err) {
     console.error("[admin] dashboard failed:", err);
     res.status(500).json({ msg: "Failed to load dashboard" });
+  }
+});
+
+/**
+ * GET /api/v1/admin/customers
+ *
+ * Every registered customer with what the platform already knows about them:
+ * how many bookings they made, how many were completed, what they have paid
+ * (the one revenue definition, services/payment/revenue.js) and when they
+ * last booked. Read-only, and no password or token field ever leaves here.
+ *
+ *   ?search=<text>   name, email or phone
+ *   ?limit=<n>       default 100, max 500
+ */
+router.get("/customers", adminAuth, async (req, res) => {
+  try {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    const query = { role: "customer" };
+    const regex = require("../utils/regex").literalSearchRegex(req.query.search);
+    if (regex) query.$or = [{ name: regex }, { email: regex }, { phone: regex }];
+
+    const customers = await User.find(query)
+      .select("name email phone isVerified createdAt vehicles profileImage")
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const ids = customers.map((c) => c._id);
+    const [byCustomer, paidByCustomer] = await Promise.all([
+      Booking.aggregate([
+        { $match: { user: { $in: ids } } },
+        {
+          $group: {
+            _id: "$user",
+            bookings: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+            cancelled: { $sum: { $cond: [{ $in: ["$status", ["cancelled", "no_show", "expired"]] }, 1, 0] } },
+            lastBookingAt: { $max: "$createdAt" },
+          },
+        },
+      ]),
+      Booking.aggregate([
+        { $match: { user: { $in: ids }, ...revenueService.REVENUE_MATCH } },
+        { $group: { _id: "$user", spent: { $sum: "$amount" } } },
+      ]),
+    ]);
+    const counts = new Map(byCustomer.map((r) => [String(r._id), r]));
+    const spend = new Map(paidByCustomer.map((r) => [String(r._id), r.spent]));
+
+    res.json({
+      total: await User.countDocuments({ role: "customer" }),
+      returned: customers.length,
+      customers: customers.map((c) => {
+        const row = counts.get(String(c._id));
+        return {
+          _id: c._id,
+          name: c.name,
+          email: c.email,
+          phone: c.phone || null,
+          isVerified: !!c.isVerified,
+          vehicles: Array.isArray(c.vehicles) ? c.vehicles.length : 0,
+          joinedAt: c.createdAt,
+          bookings: row?.bookings ?? 0,
+          completed: row?.completed ?? 0,
+          cancelled: row?.cancelled ?? 0,
+          lastBookingAt: row?.lastBookingAt ?? null,
+          spent: Math.round(((spend.get(String(c._id)) ?? 0) + Number.EPSILON) * 100) / 100,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error("[admin] customers failed:", err);
+    res.status(500).json({ msg: "Failed to load customers" });
+  }
+});
+
+/**
+ * GET /api/v1/admin/activity
+ *
+ * The newest things that happened on the platform: bookings, payments
+ * collected at the pump, vendor registrations and station changes -- each
+ * read from the records that already carry the time it happened, merged and
+ * sorted newest first. Nothing is stored for this; it is a read of what
+ * exists.
+ *
+ *   ?limit=<n>   entries per kind, default 8, max 25
+ */
+/**
+ * GET /api/v1/admin/stations/:id/overview
+ *
+ * Everything an admin wants the moment they pick a station out of the list:
+ * how it is performing, what is in its tanks, who owns it, and what has just
+ * happened there.
+ *
+ * Assembled here rather than in the browser because it is five questions of
+ * the database, and asking them one screen at a time is how a page ends up
+ * making nine requests and still showing half a picture. Every figure is a
+ * real aggregation: revenue uses the ONE definition
+ * (services/payment/revenue.js -- completed bookings whose payment was
+ * received), the queue is the same live simulation every other page reads,
+ * and stock is what the station itself records. Nothing is estimated, and a
+ * metric with no data answers null rather than a made-up zero.
+ */
+router.get("/stations/:id/overview", adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ msg: "That is not a station id." });
+
+    const station = await Station.findById(id).lean();
+    if (!station) return res.status(404).json({ msg: "Station not found" });
+
+    const stationId = station._id;
+    const today = dateKey();
+    const monthStart = startOfBusinessMonth(new Date());
+    const { queueSnapshots, fuelQueueSummary } = require("../services/queue/stationQueue");
+
+    const [statusRows, todayCount, monthCount, revenueRows, fuelMonthRows, monthlyRows, vendor, queues, recent] =
+      await Promise.all([
+        Booking.aggregate([{ $match: { station: stationId } }, { $group: { _id: "$status", count: { $sum: 1 } } }]),
+        Booking.countDocuments({ station: stationId, bookingDate: today }),
+        Booking.countDocuments({ station: stationId, bookingDate: { $gte: dateKey(monthStart) } }),
+        Booking.aggregate([
+          { $match: { station: stationId, ...revenueService.REVENUE_MATCH } },
+          { $addFields: { revenueAt: revenueService.REVENUE_AT } },
+          {
+            $facet: {
+              today: [
+                { $match: { revenueAt: { $gte: startOfBusinessDay(new Date()) } } },
+                { $group: { _id: null, revenue: { $sum: "$amount" }, bookings: { $sum: 1 } } },
+              ],
+              month: [
+                { $match: { revenueAt: { $gte: monthStart } } },
+                { $group: { _id: null, revenue: { $sum: "$amount" }, bookings: { $sum: 1 } } },
+              ],
+              allTime: [{ $group: { _id: null, revenue: { $sum: "$amount" }, bookings: { $sum: 1 } } }],
+            },
+          },
+        ]),
+        Booking.aggregate([
+          { $match: { station: stationId, ...revenueService.REVENUE_MATCH } },
+          { $addFields: { revenueAt: revenueService.REVENUE_AT } },
+          { $match: { revenueAt: { $gte: monthStart } } },
+          {
+            $group: {
+              _id: "$fuelType",
+              quantity: { $sum: { $ifNull: ["$quantity", 0] } },
+              revenue: { $sum: "$amount" },
+              bookings: { $sum: 1 },
+            },
+          },
+        ]),
+        Booking.aggregate([
+          { $match: { station: stationId, ...revenueService.REVENUE_MATCH } },
+          { $addFields: { revenueAt: revenueService.REVENUE_AT } },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m", date: "$revenueAt", timezone: MONGO_TIMEZONE } },
+              revenue: { $sum: "$amount" },
+              bookings: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+          { $limit: 24 },
+        ]),
+        station.owner
+          ? User.findById(station.owner)
+              .select("name businessName email phone vendorStatus vendorCode activated createdAt")
+              .lean()
+          : null,
+        queueSnapshots([stationId]),
+        Booking.find({ station: stationId })
+          .sort({ updatedAt: -1 })
+          .limit(8)
+          .select("orderId status fuelType quantity amount paymentStatus collectedAt updatedAt createdAt user")
+          .populate("user", "name")
+          .lean(),
+      ]);
+
+    const byStatus = Object.fromEntries(statusRows.map((r) => [r._id, r.count]));
+    const totals = revenueRows[0] || {};
+    const money = (rows) => ({ revenue: round2(rows && rows[0] && rows[0].revenue), bookings: (rows && rows[0] && rows[0].bookings) || 0 });
+    const snapshot = queues.get(String(stationId)) || null;
+    const prices = station.prices || {};
+    const stock = station.inventory || {};
+    const capacity = station.tankCapacity || {};
+    const soldByFuel = Object.fromEntries(fuelMonthRows.map((r) => [String(r._id || "").toLowerCase(), r]));
+
+    // Only the fuels this station actually sells. One it sells but has not
+    // sold this month reads zero -- that is a fact, not a gap.
+    const fuels = (station.fuelTypes || []).map((label) => {
+      const key = String(label).toLowerCase();
+      const sold = soldByFuel[key];
+      return {
+        fuel: label,
+        price: typeof prices[key] === "number" && prices[key] > 0 ? prices[key] : null,
+        stock: typeof stock[key] === "number" ? stock[key] : null,
+        capacity: typeof capacity[key] === "number" ? capacity[key] : null,
+        unit: key === "cng" ? "kg" : "L",
+        soldThisMonth: round2(sold && sold.quantity),
+        revenueThisMonth: round2(sold && sold.revenue),
+        bookingsThisMonth: (sold && sold.bookings) || 0,
+      };
+    });
+
+    res.json({
+      station: {
+        id: String(station._id),
+        name: station.name,
+        address: station.address,
+        city: station.city || null,
+        status: station.status,
+        openingHours: station.openingHours || null,
+        fuelTypes: station.fuelTypes || [],
+        coordinates: station.coordinates || null,
+        createdAt: station.createdAt,
+        updatedAt: station.updatedAt,
+      },
+      vendor: vendor
+        ? {
+            id: String(vendor._id),
+            name: vendor.name,
+            businessName: vendor.businessName || null,
+            email: vendor.email,
+            phone: vendor.phone || null,
+            vendorCode: vendor.vendorCode || null,
+            vendorStatus: vendor.vendorStatus || null,
+            activated: vendor.activated === undefined ? null : vendor.activated,
+            registeredAt: vendor.createdAt,
+          }
+        : null,
+      bookings: {
+        byStatus,
+        total: statusRows.reduce((t, r) => t + r.count, 0),
+        today: todayCount,
+        thisMonth: monthCount,
+      },
+      revenue: {
+        today: money(totals.today),
+        month: money(totals.month),
+        allTime: money(totals.allTime),
+        basis: "Completed bookings whose payment was received",
+      },
+      monthlySales: monthlyRows.map((m) => ({ month: m._id, revenue: round2(m.revenue), bookings: m.bookings })),
+      fuels,
+      queue: snapshot
+        ? {
+            waiting: snapshot.queueLength,
+            waitMinutes: snapshot.waitMinutes,
+            queueStatus: snapshot.queueStatus,
+            lineClearsAt: snapshot.lineClearsAt || null,
+            byFuel: fuelQueueSummary(snapshot),
+            serving: byStatus.serving || 0,
+          }
+        : null,
+      recentActivity: recent.map((b) => ({
+        bookingId: String(b._id),
+        orderId: b.orderId || null,
+        status: b.status,
+        fuelType: b.fuelType,
+        quantity: b.quantity,
+        amount: b.amount,
+        paymentStatus: b.paymentStatus,
+        customer: (b.user && b.user.name) || null,
+        at: b.collectedAt || b.updatedAt || b.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error("[admin] station overview failed:", err);
+    res.status(500).json({ msg: "Failed to load the station overview" });
+  }
+});
+
+router.get("/activity", adminAuth, async (req, res) => {
+  try {
+    const limit = Math.min(25, Math.max(1, Number(req.query.limit) || 8));
+    const [bookings, payments, vendors, stations] = await Promise.all([
+      Booking.find({})
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .select("orderId status fuelType quantity amount bookingDate timeSlot createdAt station user")
+        .populate("station", "name")
+        .populate("user", "name")
+        .lean(),
+      Booking.find({ paymentStatus: "paid", collectedAt: { $ne: null } })
+        .sort({ collectedAt: -1 })
+        .limit(limit)
+        .select("orderId amount collectedAt collectionMethod station")
+        .populate("station", "name")
+        .lean(),
+      User.find({ role: "vendor" })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .select("name businessName vendorStatus createdAt")
+        .lean(),
+      Station.find({})
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .select("name status updatedAt owner")
+        .populate("owner", "name businessName")
+        .lean(),
+    ]);
+
+    const entries = [
+      ...bookings.map((b) => ({
+        kind: "booking",
+        at: b.createdAt,
+        title: `${b.fuelType || "Fuel"} booking${b.orderId ? ` ${b.orderId}` : ""}`,
+        detail: `${b.user?.name || "A customer"} · ${b.station?.name || "station"} · ${b.bookingDate} ${b.timeSlot || ""}`.trim(),
+        status: b.status,
+        amount: b.amount ?? null,
+      })),
+      ...payments.map((p) => ({
+        kind: "payment",
+        at: p.collectedAt,
+        title: `Payment collected${p.orderId ? ` for ${p.orderId}` : ""}`,
+        detail: `${p.station?.name || "Station"} · ${p.collectionMethod === "upi" ? "Online (UPI)" : p.collectionMethod === "cash" ? "Cash" : "at the pump"}`,
+        status: "paid",
+        amount: p.amount ?? null,
+      })),
+      ...vendors.map((v) => ({
+        kind: "vendor",
+        at: v.createdAt,
+        title: `Vendor registered: ${v.businessName?.trim() || v.name}`,
+        detail: v.businessName?.trim() ? v.name : "",
+        status: v.vendorStatus,
+        amount: null,
+      })),
+      ...stations.map((s) => ({
+        kind: "station",
+        at: s.updatedAt,
+        title: `Station updated: ${s.name}`,
+        detail: s.owner?.businessName?.trim() || s.owner?.name || "",
+        status: s.status,
+        amount: null,
+      })),
+    ]
+      .filter((e) => e.at)
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, limit * 2);
+
+    res.json({ entries });
+  } catch (err) {
+    console.error("[admin] activity failed:", err);
+    res.status(500).json({ msg: "Failed to load recent activity" });
   }
 });
 
@@ -479,6 +834,10 @@ router.get("/orders", adminAuth, async (req, res) => {
         .sort({ bookingDate: -1, createdAt: -1 })
         .populate("user",    "name email phone")
         .populate("station", "name address")
+        // A booking made as one of several carries its group; the reference
+        // is what lets an admin see that four orders are one customer's one
+        // visit rather than four unrelated bookings (models/FleetBooking.js).
+        .populate("fleetGroup", "reference vehicleCount")
         .lean(),
 
       // Today's count (independent of date filter — always shown)
@@ -532,6 +891,15 @@ router.get("/orders", adminAuth, async (req, res) => {
         payMethod:    b.payMethod,
         status:       b.status,
         createdAt:    b.createdAt,
+        // null for an ordinary booking.
+        fleet: b.fleetGroup
+          ? {
+              fleetId: String(b.fleetGroup._id || b.fleetGroup),
+              reference: b.fleetGroup.reference || null,
+              position: b.fleetIndex ?? null,
+              of: b.fleetGroup.vehicleCount ?? null,
+            }
+          : null,
       });
     }
 
@@ -637,6 +1005,20 @@ router.patch("/orders/:bookingId/status", adminAuth, async (req, res) => {
         booking = done.toObject();
       }
     } else if (status === "serving") {
+      // The PIN's rule applies here too: a fill only starts for a customer
+      // who has checked in at the station. Support can still force it --
+      // `override: true` -- for the phone that could not check in, which is
+      // the reason an admin has this control at all.
+      // Read it here: `booking` is only assigned by the completion branch above.
+      const current = await Booking.findById(req.params.bookingId).select("stationCheckInAt").lean();
+      if (!current) return res.status(404).json({ msg: "Booking not found" });
+      if (!current.stationCheckInAt && req.body?.override !== true) {
+        return res.status(409).json({
+          reason: "NOT_CHECKED_IN",
+          msg: 'This customer has not checked in at the pump. Ask them to tap "Check In at Petrol Pump", or send override to start it anyway.',
+        });
+      }
+
       // Starting fueling means the customer is at the pump: the same
       // nozzle-locked check-in as the PIN scan (services/queue/nozzleService.js).
       let result;
@@ -723,6 +1105,33 @@ router.patch("/orders/:bookingId/status", adminAuth, async (req, res) => {
   } catch (err) {
     console.error("[admin] update order status failed:", err);
     res.status(500).json({ msg: "Failed to update booking status" });
+  }
+});
+
+/**
+ * GET /api/v1/admin/distributions
+ *
+ * The shapes the totals hide: how long people actually waited at a pump, how
+ * much fuel they actually buy, and when they actually book. Each one is a
+ * count of real booking rows (services/analytics/distributions.js), and each
+ * carries its own `total` so a chart can refuse to draw a distribution built
+ * from a handful of bookings rather than present noise as a finding.
+ *
+ * ?days=30 by default. An admin sees every station.
+ */
+router.get("/distributions", adminAuth, async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+  try {
+    const distributions = require("../services/analytics/distributions");
+    const [waiting, quantities, demand] = await Promise.all([
+      distributions.waitingTimes({ days }),
+      distributions.fuelQuantities({ days }),
+      distributions.demandByHour({ days }),
+    ]);
+    res.json({ success: true, days, waiting, quantities, demand });
+  } catch (err) {
+    console.error("[admin] distributions failed:", err.message);
+    res.status(500).json({ success: false, msg: "Could not load the distributions." });
   }
 });
 

@@ -79,6 +79,10 @@ async function transitionBooking({ bookingId, to, from, set = {}, filter = {} })
       await require("../inventory/stockLedger")
         .releaseReservation(doc._id)
         .catch((err) => console.error(`[transition] stock release failed for ${doc._id}:`, err.message));
+      // And so does the discount: a booking that is not happening was never
+      // paid for, so the points it spent go back to the customer. Once, however
+      // many paths cancel it (models/RewardLedger.js).
+      await require("../rewards/rewardService").reverseRedemption(doc);
     }
     return doc;
   } catch (err) {

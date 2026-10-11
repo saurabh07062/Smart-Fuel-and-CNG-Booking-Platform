@@ -33,6 +33,12 @@
 /* vendor secret-code access page */
 @import "./styles/vendor-secret-code.css";
 
+/* the assistant, support threads and the admin communication centre */
+@import "./styles/chat.css";
+
+/* fleet booking: several vehicles in one visit */
+@import "./styles/fleet.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

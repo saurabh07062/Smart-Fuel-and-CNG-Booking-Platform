@@ -2,6 +2,7 @@ import { useSocketConnection } from "@/hooks/useSocket";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { useSessionKeepAlive } from "@/hooks/useSessionKeepAlive";
 import ConnectionStatus from "@/components/common/ConnectionStatus";
+import OfflineNotice from "@/components/common/OfflineNotice";
 import ToastHost from "@/components/common/ToastHost";
 import AppRoutes from "@/routes/AppRoutes";
 
@@ -20,6 +21,8 @@ export default function App() {
   return (
     <>
       <ConnectionStatus />
+      {/* The app opens from the device; this says when its DATA cannot. */}
+      <OfflineNotice />
       <ToastHost />
       <AppRoutes />
     </>

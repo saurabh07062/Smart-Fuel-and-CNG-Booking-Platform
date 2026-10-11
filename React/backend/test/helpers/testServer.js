@@ -25,6 +25,26 @@ process.env.PORT = new URL(process.env.TEST_API_URL || DEFAULT_API).port || "505
 process.env.API_RATE_LIMIT_PER_MINUTE = process.env.API_RATE_LIMIT_PER_MINUTE || "10000";
 process.env.VENDOR_ACCESS_ATTEMPTS_PER_IP = process.env.VENDOR_ACCESS_ATTEMPTS_PER_IP || "1000";
 
+/**
+ * The auth endpoints' per-IP budgets, for the same reason and with a sharper
+ * edge: they are small (5) and measured in quarter hours, and this server
+ * stays up across many runs, so its counters outlive the run that filled
+ * them. Two resend-verification calls per run means the third run of
+ * hardening.test.js was refused with 429 -- a failure that said nothing about
+ * the code and cleared only by restarting this process.
+ *
+ * A test file cannot fix that from its own side: it blanks REDIS_URL in ITS
+ * process (authRoutes.test.js, passwordReset.test.js), but these counters
+ * live in this one, across the HTTP boundary.
+ *
+ * Raised here only. The limiter's own behaviour is tested directly in
+ * rateLimiter.test.js, and the per-account lockouts are keyed by account, so
+ * nothing that these numbers would otherwise prove is lost.
+ */
+for (const name of ["LOGIN", "REGISTER", "REFRESH", "FORGOT_PASSWORD", "RESET_PASSWORD", "RESEND_VERIFICATION"]) {
+  process.env[`AUTH_RATE_LIMIT_${name}`] = process.env[`AUTH_RATE_LIMIT_${name}`] || "10000";
+}
+
 console.log(
   `[test-server] database ${process.env.MONGO_URI} · port ${process.env.PORT} · email off · ` +
     `redis ${process.env.REDIS_URL || "none (in-process)"} · ` +

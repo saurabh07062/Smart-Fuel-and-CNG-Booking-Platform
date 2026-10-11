@@ -12,9 +12,17 @@ interface StationState {
   error: string | null;
   /** "all" | "petrol" | "diesel" | "cng" -- the Vanilla state.searchFilter, unchanged. */
   filter: "all" | "petrol" | "diesel" | "cng";
+  /**
+   * When the list on screen came from this device's last successful load
+   * rather than from the server just now (ISO time). Pages show it as "last
+   * updated ..." so nobody books against a price that may have moved.
+   */
+  stale: string | null;
 
   load: () => Promise<void>;
   setFilter: (filter: "all" | "petrol" | "diesel" | "cng") => void;
+  /** Called once fresh data has replaced the saved copy. */
+  clearStale: () => void;
   setStations: (stations: UiStation[]) => void;
   setSelected: (station: UiStation | null) => void;
   /**
@@ -31,8 +39,42 @@ interface StationState {
   removeStation: (id: string) => void;
 }
 
-export const useStationStore = create<StationState>((set) => ({
+const CACHE_KEY = "fm_stations_cache";
+/** A day: older than that and the prices are not worth showing at all. */
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Keep the last list the server actually returned, so the app has something
+ * true to show on a cold start with no network.
+ *
+ * Only what is already public on the stations page -- names, prices, hours,
+ * coordinates. No bookings, no customer, nothing private; those need a live
+ * session by design.
+ */
+function rememberStations(stations: UiStation[]) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: new Date().toISOString(), stations }));
+  } catch {
+    /* storage blocked or full: the app simply has no offline copy */
+  }
+}
+
+function cachedStations(): { at: string; stations: UiStation[] } | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { at?: string; stations?: UiStation[] };
+    if (!parsed?.at || !Array.isArray(parsed.stations)) return null;
+    if (Date.now() - new Date(parsed.at).getTime() > CACHE_TTL_MS) return null;
+    return { at: parsed.at, stations: parsed.stations };
+  } catch {
+    return null;
+  }
+}
+
+export const useStationStore = create<StationState>((set, get) => ({
   stations: [],
+  stale: null,
   selected: null,
   loading: false,
   error: null,
@@ -48,14 +90,24 @@ export const useStationStore = create<StationState>((set) => ({
     set({ loading: true, error: null });
     try {
       const stations = await fetchStations(getLastKnownUserCoords());
-      set({ stations, loading: false });
+      set({ stations, loading: false, stale: null });
+      rememberStations(stations);
     } catch {
-      // Keep whatever is already on screen; only surface the failure.
-      set({ loading: false, error: "Could not load stations." });
+      // Keep whatever is already on screen; only surface the failure. On a
+      // cold start with no network there is nothing on screen, so the list
+      // saved from the last successful load stands in -- real data this
+      // device really received, marked stale, never invented.
+      const cached = get().stations.length === 0 ? cachedStations() : null;
+      set({
+        ...(cached && cached.stations.length > 0 ? { stations: cached.stations, stale: cached.at } : {}),
+        loading: false,
+        error: "Could not load stations.",
+      });
     }
   },
 
   setFilter: (filter) => set({ filter }),
+  clearStale: () => set({ stale: null }),
   setStations: (stations) => set({ stations }),
   setSelected: (selected) => set({ selected }),
 

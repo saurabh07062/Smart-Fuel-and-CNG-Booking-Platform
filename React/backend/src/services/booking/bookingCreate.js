@@ -37,6 +37,8 @@ const metrics = require("../core/metrics");
 const { normaliseFuel, fuelLabel, fuelUnit } = require("../../config/fuels");
 const { dateKey, parseClock, atBusinessTime, formatHHMM } = require("../../config/businessTime");
 const { normaliseVehicleSnapshot } = require("./vehicleSnapshot");
+const fuelAmount = require("./fuelAmount");
+const rewardService = require("../rewards/rewardService");
 const { initialPaymentStatus, normalisePayMethod } = require("../payment/payMethod");
 const { onlinePaymentsEnabled, ONLINE_PAYMENT_DISABLED_MSG } = require("../../config/payments");
 const { waitlist } = require("../queue/waitlist");
@@ -132,14 +134,22 @@ function validateInput(body = {}) {
     throw new BookingError(400, "INVALID_STATION", "A valid stationId is required.");
   }
 
-  const quantity = Number(body.quantity);
-  if (!Number.isFinite(quantity) || quantity < QUANTITY_MIN || quantity > QUANTITY_MAX) {
-    throw new BookingError(
-      400,
-      "INVALID_QUANTITY",
-      `Quantity must be between ${QUANTITY_MIN} and ${QUANTITY_MAX}.`,
-    );
+  /**
+   * How much fuel -- said as a quantity, or as money.
+   *
+   * A quantity request is read and checked exactly as it always was. An
+   * amount request ("₹1000 of petrol") carries no quantity yet: the station's
+   * price is not known until it has been read from the database, so the
+   * division happens there (createWithinGuards, below) through the same
+   * shared resolver the fleet flow uses (services/booking/fuelAmount.js).
+   */
+  let howMuch;
+  try {
+    howMuch = fuelAmount.readRequest(body);
+  } catch (err) {
+    throw new BookingError(400, err.reason || "INVALID_QUANTITY", err.message);
   }
+  const quantity = howMuch.quantity;
 
   const bookingDate = String(body.bookingDate || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate)) {
@@ -170,7 +180,75 @@ function validateInput(body = {}) {
     );
   }
 
-  return { fuel, stationId: String(stationId), quantity, bookingDate, timeSlot };
+  /**
+   * Reward points the customer wants to spend on this booking.
+   *
+   * Only the SHAPE is checked here. Whether they have that many, and whether
+   * that many may be spent on a bill of this size, depends on the station's
+   * price -- which is not known until the station has been read. That check is
+   * services/rewards/rewardService.js validateRedemption, below.
+   */
+  const redeemPoints = readRedeemPoints(body);
+
+  return {
+    fuel,
+    stationId: String(stationId),
+    quantity,
+    howMuch,
+    bookingDate,
+    timeSlot,
+    redeemPoints,
+    ...validateBookedFor(body),
+  };
+}
+
+/**
+ * `redeemPoints` from the request body, as a whole number of points.
+ *
+ * Absent, blank and 0 all mean "no discount" -- a customer who simply does not
+ * use points must not be refused. Anything else must be a whole, non-negative
+ * number: a request for "-50" or "12.5" points is a client bug, and silently
+ * reading it as 0 would hide it.
+ */
+function readRedeemPoints(body = {}) {
+  const raw = body.redeemPoints;
+  if (raw === undefined || raw === null || raw === "" || raw === false) return 0;
+  const points = Number(raw);
+  if (!Number.isInteger(points) || points < 0) {
+    throw new BookingError(400, "INVALID_POINTS", "redeemPoints must be a whole number of reward points.");
+  }
+  return points;
+}
+
+/**
+ * "This slot is for someone else": an optional name, and an optional number
+ * for the attendant to call. Both are refused rather than silently trimmed
+ * away when they are not usable, so the customer fixes them here instead of
+ * the attendant finding a blank name at the pump.
+ *
+ * The booking still belongs to the signed-in customer either way; this only
+ * records who will arrive with the vehicle.
+ */
+function validateBookedFor(body = {}) {
+  const name = body.bookedForName != null ? String(body.bookedForName).trim() : "";
+  const phoneRaw = body.bookedForPhone != null ? String(body.bookedForPhone).trim() : "";
+  if (!name && !phoneRaw) return {};
+
+  if (name.length < 2 || name.length > 60) {
+    throw new BookingError(
+      400,
+      "INVALID_BOOKED_FOR",
+      "Enter the name of the person this slot is for (2-60 characters).",
+    );
+  }
+
+  // Indian mobile number, with or without +91 / spaces; the phone is optional.
+  const digits = phoneRaw.replace(/[\s-]/g, "").replace(/^(\+91|0)/, "");
+  if (phoneRaw && !/^[6-9]\d{9}$/.test(digits)) {
+    throw new BookingError(400, "INVALID_BOOKED_FOR_PHONE", "Enter a valid 10-digit mobile number, or leave it blank.");
+  }
+
+  return { bookedForName: name, bookedForPhone: phoneRaw ? digits : null };
 }
 
 
@@ -259,7 +337,12 @@ async function createCustomerBooking({ user, body }) {
 }
 
 async function createWithinGuards({ user, input, body, attemptId }) {
-  const { fuel, stationId, quantity, bookingDate, timeSlot } = input;
+  const { fuel, stationId, bookingDate, timeSlot } = input;
+  // Filled in below, once the station's price is known: an amount booking has
+  // no quantity until then.
+  let quantity = input.quantity;
+  let bookedBy = "quantity";
+  let requestedAmount = null;
 
   // ---- 1. risk, before any capacity is examined --------------------------
   let risk = null;
@@ -343,10 +426,46 @@ async function createWithinGuards({ user, input, body, attemptId }) {
     );
   }
 
+  // "₹1000 of petrol": the quantity comes from the station's own price, here,
+  // where that price has just been read -- never from the client's preview.
+  if (input.howMuch?.bookedBy === "amount") {
+    try {
+      const resolved = fuelAmount.resolve({ unitPrice: station.prices?.[fuel], fuel, request: input.howMuch });
+      quantity = resolved.quantity;
+      bookedBy = "amount";
+      requestedAmount = resolved.requestedAmount;
+    } catch (err) {
+      throw new BookingError(err.reason === "PRICE_UNAVAILABLE" ? 409 : 400, err.reason, err.message);
+    }
+  }
+
   const pricing = priceBooking(station, fuel, quantity);
   if (!pricing) {
     throw new BookingError(409, "PRICE_UNAVAILABLE", `This station has not published a ${label} price.`);
   }
+
+  /**
+   * The points discount, now that the bill is known.
+   *
+   * Checked here -- before any stock is reserved or any slot is taken -- so a
+   * customer who asked for more points than they have is told so without a
+   * booking being created and rolled back. The points are not SPENT yet: that
+   * happens once the booking exists to attach them to (below), under the same
+   * per-customer lock, so two bookings cannot spend one balance twice.
+   */
+  let redemption = null;
+  try {
+    redemption = await rewardService.validateRedemption({
+      userId: user.id,
+      amount: pricing.amount,
+      points: input.redeemPoints,
+    });
+  } catch (err) {
+    if (err instanceof rewardService.RewardError) throw new BookingError(err.status, err.reason, err.message);
+    throw err;
+  }
+  const rewardDiscount = redemption ? redemption.discount : 0;
+  const payableAmount = round2(Math.max(0, pricing.amount - rewardDiscount));
 
   const stock = Number(station.inventory?.[fuel]);
   if (!Number.isFinite(stock)) {
@@ -385,7 +504,11 @@ async function createWithinGuards({ user, input, body, attemptId }) {
 
   // ---- 4. the critical section --------------------------------------------
   const writeBooking = async (guards = []) => {
-    const active = await Booking.exists({ user: user.id, status: { $in: ACTIVE_STATUSES } });
+    // One live ORDINARY booking per customer. Fleet members are excluded --
+    // a customer fuelling five vans holds five live bookings on purpose
+    // (services/booking/fleetBooking.js) -- and the database index behind this
+    // check draws exactly the same line (models/Booking.js).
+    const active = await Booking.exists({ user: user.id, status: { $in: ACTIVE_STATUSES }, fleetGroup: null });
     if (active) {
       throw new BookingError(
         400,
@@ -415,9 +538,20 @@ async function createWithinGuards({ user, input, body, attemptId }) {
       userContact: customer.phone || customer.email || null,
       fuelType: label,
       quantity,
+      // How the customer asked for it. The quantity above is what is booked,
+      // reserved and invoiced either way; these two only let the receipt and
+      // the booking screens say "booked for ₹1000 of Petrol" instead of
+      // showing a quantity the customer never typed.
+      bookedBy,
+      requestedAmount,
       price: pricing.price,
       taxes: pricing.taxes,
       amount: pricing.amount,
+      // The points discount, and what is actually collected at the pump. Both
+      // are the server's figures; the request only said how many points.
+      rewardPointsUsed: redemption ? redemption.points : 0,
+      rewardDiscount,
+      payableAmount,
       bookingDate,
       timeSlot,
       startTime: formatHHMM(placed.start),
@@ -427,7 +561,15 @@ async function createWithinGuards({ user, input, body, attemptId }) {
       resource: placed.resource,
       serviceDurationSeconds: window.durationSeconds,
       vehiclePlate: body.vehiclePlate ? String(body.vehiclePlate).trim().slice(0, 20) : undefined,
+      // The plate as the "one live booking per vehicle" index compares it
+      // (models/Booking.js). Written here from the plate this booking is for,
+      // so a single booking and a fleet member are held to the same rule --
+      // the same van cannot hold two live slots by either route.
+      vehicleKey: body.vehiclePlate ? require("./fleetPlanner").plateKey(body.vehiclePlate) : undefined,
       ...normaliseVehicleSnapshot(body),
+      // Who will actually arrive, when the slot was booked for someone else.
+      bookedForName: input.bookedForName ?? null,
+      bookedForPhone: input.bookedForPhone ?? null,
       payMethod: body.payMethod, // normalised to 'online' | 'station' by the schema setter
       paymentStatus: initialPaymentStatus(body.payMethod),
       // A waitlisted booking gets its PIN when it is promoted into a real slot.
@@ -467,7 +609,7 @@ async function createWithinGuards({ user, input, body, attemptId }) {
     }
 
     try {
-      await doc.save();
+      await saveWithFreshOrderId(doc);
       // The lock serialised this fuel's bookings; if it was lost mid-way,
       // another server may have placed an overlapping booking on the same
       // nozzle. Check after the write and back out rather than double-book.
@@ -499,7 +641,21 @@ async function createWithinGuards({ user, input, body, attemptId }) {
       // was bypassed or lost.
       if (err?.code === 11000) {
         metrics.inc("booking_db_guard_count");
-        const byUser = Boolean(err.keyPattern?.user) || /uniq_active_booking_per_user/.test(err.message);
+        // Which guard fired decides what the customer is told. The two
+        // user-scoped indexes both carry `user` in their key, so the vehicle
+        // one is checked FIRST -- otherwise booking a van that is already
+        // booked would be reported as "you already have an active booking",
+        // which is a different problem with a different remedy.
+        const byVehicle =
+          Boolean(err.keyPattern?.vehicleKey) || /uniq_active_booking_per_vehicle/.test(err.message);
+        if (byVehicle) {
+          throw new BookingError(
+            400,
+            "VEHICLE_ALREADY_BOOKED",
+            "This vehicle already has an active booking. Complete or cancel it before booking again.",
+          );
+        }
+        const byUser = Boolean(err.keyPattern?.user) || /uniq_active_solo_booking_per_user/.test(err.message);
         if (byUser) {
           throw new BookingError(
             400,
@@ -510,6 +666,39 @@ async function createWithinGuards({ user, input, body, attemptId }) {
         throw new BookingError(400, "SLOT_FULL", "This slot was just taken.");
       }
       throw err;
+    }
+
+    /**
+     * Now spend the points, against the booking that exists to hold them.
+     *
+     * After the write, not before: a ledger row pointing at a booking that was
+     * never saved could never be refunded. Still inside the per-customer lock,
+     * so the balance cannot be spent twice.
+     *
+     * If the balance moved anyway (a booking of theirs completed and earned
+     * elsewhere in this instant, taking the balance below what was quoted) the
+     * booking STANDS, at full price, and the discount is taken off it. Losing a
+     * confirmed slot over a discount would be the worse outcome of the two, and
+     * the customer still has their points.
+     */
+    if (redemption) {
+      try {
+        await rewardService.redeem({
+          userId: user.id,
+          points: redemption.points,
+          booking: doc._id,
+          note: `Discount on ${label} booking ${doc.orderId}`,
+        });
+      } catch (err) {
+        console.warn(`[booking] ${doc._id}: reward discount not applied (${err.reason || err.message}); charging full price.`);
+        doc.rewardPointsUsed = 0;
+        doc.rewardDiscount = 0;
+        doc.payableAmount = pricing.amount;
+        await Booking.updateOne(
+          { _id: doc._id },
+          { $set: { rewardPointsUsed: 0, rewardDiscount: 0, payableAmount: pricing.amount } },
+        ).catch((e) => console.error(`[booking] could not clear the unapplied discount on ${doc._id}:`, e.message));
+      }
     }
     return doc;
   };
@@ -562,6 +751,27 @@ async function createWithinGuards({ user, input, body, attemptId }) {
 /** Human-readable order reference, e.g. FM-2026-8F3A1C2B. */
 function generateOrderId() {
   return `FM-${dateKey().slice(0, 4)}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+/**
+ * Save the booking, giving it a new order id if that one is already taken.
+ *
+ * orderId is unique in the database (models/Booking.js), because two orders
+ * sharing a reference is an accounting problem. The id is 4 random bytes, so a
+ * clash is vanishingly unlikely -- but "unlikely" would surface as "This slot
+ * was just taken", a wrong answer to a customer whose slot was free. One retry
+ * with a fresh id costs nothing and removes that failure entirely.
+ */
+async function saveWithFreshOrderId(doc, attempts = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await doc.save();
+    } catch (err) {
+      const clashedOnOrderId = err?.code === 11000 && Boolean(err.keyPattern?.orderId);
+      if (!clashedOnOrderId || attempt >= attempts) throw err;
+      doc.orderId = generateOrderId();
+    }
+  }
 }
 
 const round2 = (n) => Math.round(n * 100) / 100;

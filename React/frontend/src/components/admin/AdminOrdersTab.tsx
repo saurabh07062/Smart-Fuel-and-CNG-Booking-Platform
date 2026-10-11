@@ -5,6 +5,7 @@ import { useAdminStore } from "@/store/adminStore";
 import { pushToast } from "@/store/toastStore";
 import { toApiError } from "@/services/api/apiClient";
 import { ConsoleLoading } from "@/components/console/ConsoleBits";
+import DataTable from "@/components/common/DataTable";
 
 /** _orderStatusStyle(). */
 const STATUS_STYLE: Record<string, string> = {
@@ -260,23 +261,86 @@ export default function AdminOrdersTab() {
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="vm-table">
-                <thead className="text-[10px] vm-text-muted uppercase tracking-widest vm-bg-ground">
-                  <tr>
-                    <th className="px-5 py-3 font-bold">Order ID</th>
-                    <th className="px-5 py-3 font-bold">Customer</th>
-                    <th className="px-5 py-3 font-bold">Vehicle</th>
-                    <th className="px-5 py-3 font-bold">Date &amp; Slot</th>
-                    <th className="px-5 py-3 font-bold">Fuel</th>
-                    <th className="px-5 py-3 font-bold">Amount</th>
-                    <th className="px-5 py-3 font-bold">Payment</th>
-                    <th className="px-5 py-3 font-bold">Status</th>
-                    <th className="px-5 py-3 font-bold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {st.bookings.map((b) => {
+            {/* The shared table: one header style, one empty state, one
+                scroll behaviour (components/common/DataTable.tsx). The columns
+                a phone cannot fit drop out rather than forcing a long
+                horizontal scroll to reach the actions. */}
+            <DataTable
+              label={`Bookings at ${st.stationName ?? "this station"}`}
+              rows={st.bookings}
+              rowKey={(b) => b.bookingId}
+              empty="No bookings at this station yet."
+              columns={[
+                {
+                  key: "order",
+                  header: "Order ID",
+                  cell: (b) => <span className="font-mono text-xs font-bold vm-accent-text">{b.orderId}</span>,
+                },
+                {
+                  key: "customer",
+                  header: "Customer",
+                  cell: (b) => (
+                    <>
+                      <p className="font-medium vm-text text-sm">{b.userName}</p>
+                      <p className="text-[10px] vm-text-muted">{b.userContact}</p>
+                    </>
+                  ),
+                },
+                {
+                  key: "vehicle",
+                  header: "Vehicle",
+                  cell: (b) => (
+                    <>
+                      <span className="font-bold text-sm">{b.vehiclePlate}</span>
+                      {/* One of a fleet: which vehicle, of how many, and the
+                          reference that ties them together. */}
+                      {b.fleet && (
+                        <p className="text-[10px] font-bold vm-text-muted mt-0.5" title={b.fleet.reference ?? undefined}>
+                          <i className="fas fa-truck-fast mr-1" aria-hidden />
+                          Fleet {b.fleet.position ?? "?"}
+                          {b.fleet.of ? " of " + b.fleet.of : ""}
+                        </p>
+                      )}
+                    </>
+                  ),
+                },
+                {
+                  key: "slot",
+                  header: "Date & Slot",
+                  hideOnPhone: true,
+                  cell: (b) => (
+                    <>
+                      <p className="text-sm">{b.bookingDate}</p>
+                      <p className="text-[10px] vm-text-muted">
+                        {b.startTime} – {b.endTime}
+                      </p>
+                    </>
+                  ),
+                },
+                {
+                  key: "fuel",
+                  header: "Fuel",
+                  hideOnPhone: true,
+                  cell: (b) => (
+                    <>
+                      <p className="text-sm">{b.fuelType}</p>
+                      <p className="text-[10px] vm-text-muted">{b.quantity} L/kg</p>
+                    </>
+                  ),
+                },
+                {
+                  key: "amount",
+                  header: "Amount",
+                  align: "right",
+                  cell: (b) => (
+                    <span className="font-mono font-bold text-sm">₹{Number(b.amount).toLocaleString("en-IN")}</span>
+                  ),
+                },
+                {
+                  key: "payment",
+                  header: "Payment",
+                  hideOnPhone: true,
+                  cell: (b) => {
                     const pc =
                       b.paymentStatus === "paid"
                         ? "text-emerald-400"
@@ -284,85 +348,66 @@ export default function AdminOrdersTab() {
                           ? "text-yellow-400"
                           : "vm-text-muted";
                     return (
-                      <tr key={b.bookingId}>
-                        <td className="px-5 py-4 font-mono text-xs font-bold vm-accent-text">
-                          {b.orderId}
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="font-medium vm-text text-sm">{b.userName}</p>
-                          <p className="text-[10px] vm-text-muted">{b.userContact}</p>
-                        </td>
-                        <td className="px-5 py-4 font-bold text-sm">{b.vehiclePlate}</td>
-                        <td className="px-5 py-4">
-                          <p className="text-sm">{b.bookingDate}</p>
-                          <p className="text-[10px] vm-text-muted">
-                            {b.startTime} – {b.endTime}
-                          </p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="text-sm">{b.fuelType}</p>
-                          <p className="text-[10px] vm-text-muted">{b.quantity} L/kg</p>
-                        </td>
-                        <td className="px-5 py-4 font-mono font-bold text-sm">
-                          ₹{Number(b.amount).toLocaleString("en-IN")}
-                        </td>
-                        <td className={`px-5 py-4 text-xs font-bold ${pc}`}>
-                          {(b.paymentStatus || "").replace(/_/g, " ").toUpperCase()}
-                        </td>
-                        <td className="px-5 py-4">
-                          <span
-                            className={`px-2 py-1 rounded border text-[10px] font-bold ${
-                              STATUS_STYLE[b.status] ?? "vm-text-muted border-gray-700 bg-gray-800/30"
-                            }`}
-                          >
-                            {STATUS_LABEL[b.status] ?? b.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setDetail(b)}
-                              className="vm-icon-btn"
-                              title="View Details"
-                              aria-label="View details"
-                            >
-                              <i className="fas fa-eye text-xs" aria-hidden />
-                            </button>
-                            <select
-                              className="text-xs vm-bg-ground border vm-border rounded px-2 py-1 vm-text cursor-pointer"
-                              value=""
-                              onChange={(e) => void setOrderStatus(b.bookingId, e.target.value)}
-                              aria-label={`Update status for ${b.orderId}`}
-                            >
-                              <option value="">Update Status</option>
-                              {STATUS_OPTIONS.map(([v, l]) => (
-                                <option key={v} value={v}>
-                                  {l}
-                                </option>
-                              ))}
-                            </select>
-                            {api.DELETABLE_ORDER_STATUSES.includes(b.status) && (
-                              <button
-                                onClick={() => void deleteOrder(b)}
-                                disabled={deleting === b.bookingId}
-                                className="vm-icon-btn text-red-400 hover:bg-red-600 disabled:opacity-50"
-                                title="Delete Order"
-                                aria-label={`Delete order ${b.orderId}`}
-                              >
-                                <i
-                                  className={`fas ${deleting === b.bookingId ? "fa-spinner fa-spin" : "fa-trash"} text-xs`}
-                                  aria-hidden
-                                />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                      <span className={`text-xs font-bold ${pc}`}>
+                        {(b.paymentStatus || "").replace(/_/g, " ").toUpperCase()}
+                      </span>
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  },
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  cell: (b) => (
+                    <span
+                      className={`px-2 py-1 rounded border text-[10px] font-bold ${
+                        STATUS_STYLE[b.status] ?? "vm-text-muted border-gray-700 bg-gray-800/30"
+                      }`}
+                    >
+                      {STATUS_LABEL[b.status] ?? b.status}
+                    </span>
+                  ),
+                },
+                {
+                  key: "actions",
+                  header: "Actions",
+                  align: "right",
+                  cell: (b) => (
+                    <div className="flex items-center gap-2 justify-end">
+                      <button onClick={() => setDetail(b)} className="vm-icon-btn" title="View Details" aria-label="View details">
+                        <i className="fas fa-eye text-xs" aria-hidden />
+                      </button>
+                      <select
+                        className="text-xs vm-bg-ground border vm-border rounded px-2 py-1 vm-text cursor-pointer"
+                        value=""
+                        onChange={(e) => void setOrderStatus(b.bookingId, e.target.value)}
+                        aria-label={`Update status for ${b.orderId}`}
+                      >
+                        <option value="">Update Status</option>
+                        {STATUS_OPTIONS.map(([v, l]) => (
+                          <option key={v} value={v}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                      {api.DELETABLE_ORDER_STATUSES.includes(b.status) && (
+                        <button
+                          onClick={() => void deleteOrder(b)}
+                          disabled={deleting === b.bookingId}
+                          className="vm-icon-btn text-red-400 hover:bg-red-600 disabled:opacity-50"
+                          title="Delete Order"
+                          aria-label={`Delete order ${b.orderId}`}
+                        >
+                          <i
+                            className={`fas ${deleting === b.bookingId ? "fa-spinner fa-spin" : "fa-trash"} text-xs`}
+                            aria-hidden
+                          />
+                        </button>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+            />
           </div>
         ))
       )}
@@ -389,6 +434,9 @@ function OrderDetailModal({ order: b, onClose }: { order: AdminOrder; onClose: (
     ["Contact", b.userContact],
     ["Station", b.stationName],
     ["Vehicle", b.vehiclePlate],
+    ...(b.fleet
+      ? ([["Fleet booking", (b.fleet.reference ?? "-") + " · vehicle " + (b.fleet.position ?? "?") + (b.fleet.of ? " of " + b.fleet.of : "")]] as Array<[string, string]>)
+      : []),
     ["Booking Date", b.bookingDate],
     ["Time Slot", `${b.startTime} – ${b.endTime}`],
     ["Fuel Type", b.fuelType],

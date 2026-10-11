@@ -1,0 +1,874 @@
+/* ============================================================
+   FUELMART CHAT — the assistant, the conversation list and threads
+
+   Built entirely on the EXISTING tokens (variables.css): --card,
+   --border, --text, --muted, --primary, --status-*. Nothing here
+   introduces a new colour, so the widget is already correct in dark
+   mode and already wears whichever identity it is dropped into:
+
+     customer app   --primary, which .cx-app re-points to the app's
+                    own red (customer.css, "one red accent")
+     operator console  --z-accent (console.css)
+
+   The .fm-chat block reads --fm-chat-accent, which defaults to
+   --primary and is re-pointed to --z-accent inside the console (see
+   the override at the foot of this file). One stylesheet, two
+   identities, no duplicated rules and no hard-coded colour to drift.
+
+   Mobile first: the panel is a full-height sheet under 640px and a
+   floating card above it.
+   ============================================================ */
+
+.fm-chat {
+  --fm-chat-accent: var(--primary);
+  --fm-chat-accent-soft: var(--primary-light);
+  --fm-chat-radius: 16px;
+  --fm-chat-width: 400px;
+  --fm-chat-height: min(620px, calc(100dvh - 120px));
+  font-family: inherit;
+}
+
+/* ---------- the floating button ---------- */
+
+.fm-chat-fab {
+  position: fixed;
+  right: 20px;
+  /* Clear of the customer app's bottom bar on a phone (customer.css .cx-bottom). */
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--fm-chat-accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.fm-chat-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-xl);
+}
+.fm-chat-fab:focus-visible {
+  outline: 3px solid var(--fm-chat-accent);
+  outline-offset: 3px;
+}
+@media (max-width: 767px) {
+  /* Above the customer bottom nav, and label-free so it never covers content. */
+  .fm-chat-fab {
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    padding: 14px;
+  }
+  .fm-chat-fab-label {
+    display: none;
+  }
+}
+
+.fm-chat-fab-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--status-bad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+/* ---------- the panel ---------- */
+
+.fm-chat-panel {
+  position: fixed;
+  right: 20px;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  z-index: 1210;
+  display: flex;
+  flex-direction: column;
+  width: var(--fm-chat-width);
+  max-width: calc(100vw - 32px);
+  height: var(--fm-chat-height);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--fm-chat-radius);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+@media (max-width: 639px) {
+  /* A sheet, not a floating card: a 400px card on a 360px phone is a scroll trap. */
+  .fm-chat-panel {
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+  }
+}
+
+.fm-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--fm-chat-accent);
+  color: #fff;
+}
+.fm-chat-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.fm-chat-head p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  opacity: 0.88;
+}
+.fm-chat-head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.fm-chat-head-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.fm-chat-head-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.fm-chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overscroll-behavior: contain;
+}
+
+.fm-chat-foot {
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.fm-chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.fm-chat-input {
+  flex: 1;
+  min-height: 42px;
+  max-height: 120px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  resize: none;
+}
+.fm-chat-input:focus {
+  outline: none;
+  border-color: var(--fm-chat-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fm-chat-accent) 18%, transparent);
+}
+.fm-chat-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: 12px;
+  background: var(--fm-chat-accent);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.fm-chat-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- bubbles ---------- */
+
+.fm-chat-msg {
+  max-width: 86%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13.2px;
+  line-height: 1.5;
+  /* Server text may contain newlines (the assistant answers in short lines). */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.fm-chat-msg-them {
+  align-self: flex-start;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-bottom-left-radius: 5px;
+}
+.fm-chat-msg-me {
+  align-self: flex-end;
+  background: var(--fm-chat-accent);
+  color: #fff;
+  border-bottom-right-radius: 5px;
+}
+.fm-chat-msg-pending {
+  opacity: 0.72;
+}
+.fm-chat-msg-failed {
+  border: 1px solid var(--status-bad);
+}
+.fm-chat-msg-system {
+  align-self: center;
+  max-width: 94%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+  padding: 7px 10px;
+}
+.fm-chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+.fm-chat-sender {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+
+/* ---------- quick actions ---------- */
+
+.fm-chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.fm-chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text2);
+  font-size: 12.2px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.fm-chat-chip:hover {
+  border-color: var(--fm-chat-accent);
+  color: var(--fm-chat-accent);
+  background: var(--fm-chat-accent-soft);
+}
+.fm-chat-chip:focus-visible {
+  outline: 2px solid var(--fm-chat-accent);
+  outline-offset: 2px;
+}
+.fm-chat-chip i {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.fm-chat-chip-primary {
+  border-color: var(--fm-chat-accent);
+  background: var(--fm-chat-accent);
+  color: #fff;
+}
+.fm-chat-chip-primary:hover {
+  background: var(--fm-chat-accent);
+  color: #fff;
+  filter: brightness(1.07);
+}
+
+/* ---------- the booking summary card ---------- */
+
+.fm-chat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 13px;
+  box-shadow: var(--shadow-sm);
+}
+.fm-chat-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+.fm-chat-card-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text);
+}
+.fm-chat-card-sub {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.fm-chat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+  margin-top: 11px;
+}
+/* A long unbroken value -- an email address, a station id -- must wrap inside
+   its own cell. Without this it ran straight across the next column and the
+   two facts were printed on top of each other. */
+.fm-chat-grid > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fm-chat-fact-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.fm-chat-fact-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+/* "Not available" is a first-class value here, never an empty gap. */
+.fm-chat-fact-empty {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.fm-chat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.fm-chat-pill-good {
+  background: var(--status-good-bg);
+  color: var(--status-good);
+}
+.fm-chat-pill-warn {
+  background: var(--status-warn-bg);
+  color: var(--status-warn);
+}
+.fm-chat-pill-bad {
+  background: var(--status-bad-bg);
+  color: var(--status-bad);
+}
+.fm-chat-pill-mute {
+  background: var(--bg2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.fm-chat-pin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 11px;
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: var(--bg2);
+  border: 1px dashed var(--border);
+}
+.fm-chat-pin code {
+  font-family: var(--cx-mono, ui-monospace, monospace);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+
+/* ---------- conversation list ---------- */
+
+.fm-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fm-chat-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+}
+.fm-chat-row:hover {
+  border-color: var(--fm-chat-accent);
+}
+.fm-chat-row:focus-visible {
+  outline: 2px solid var(--fm-chat-accent);
+  outline-offset: 2px;
+}
+.fm-chat-row-selected {
+  border-color: var(--fm-chat-accent);
+  background: var(--fm-chat-accent-soft);
+}
+.fm-chat-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fm-chat-row-subject {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fm-chat-row-last {
+  margin: 4px 0 0;
+  font-size: 11.8px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fm-chat-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 10.8px;
+  color: var(--muted);
+}
+.fm-chat-unread {
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--status-bad);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 19px;
+  text-align: center;
+}
+
+/* ---------- states ---------- */
+
+.fm-chat-empty {
+  margin: auto;
+  padding: 26px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+.fm-chat-empty i {
+  font-size: 26px;
+  opacity: 0.4;
+  margin-bottom: 10px;
+  display: block;
+}
+.fm-chat-empty h3 {
+  margin: 0 0 5px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+}
+.fm-chat-empty p {
+  margin: 0;
+  font-size: 12.3px;
+  line-height: 1.55;
+}
+.fm-chat-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--status-bad-bg);
+  border: 1px solid var(--status-bad);
+  color: var(--status-bad);
+  font-size: 12.3px;
+  font-weight: 600;
+}
+.fm-chat-typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 10px 12px;
+  align-self: flex-start;
+}
+.fm-chat-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: fmChatBlink 1.1s infinite ease-in-out;
+}
+.fm-chat-typing span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.fm-chat-typing span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes fmChatBlink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fm-chat-typing span {
+    animation: none;
+    opacity: 0.55;
+  }
+  .fm-chat-fab {
+    transition: none;
+  }
+}
+
+/* ---------- the operator console's identity ---------- */
+
+/* The console owns --z-accent (console.css); inside it the widget and the
+   communication centre wear the console's colour rather than customer blue. */
+.console .fm-chat,
+.fm-chat-console {
+  --fm-chat-accent: var(--z-accent, var(--primary));
+  --fm-chat-accent-soft: color-mix(in srgb, var(--z-accent, var(--primary)) 12%, transparent);
+}
+
+/* ---------- the admin communication centre ---------- */
+
+.fm-chat-centre {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1023px) {
+  /* One column on a tablet: the list, then the open thread beneath it. */
+  .fm-chat-centre {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.fm-chat-centre-pane {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.fm-chat-centre-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.fm-chat-centre-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 12px;
+}
+.fm-chat-centre-thread {
+  display: flex;
+  flex-direction: column;
+  height: min(70vh, 640px);
+}
+.fm-chat-tabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 11px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.fm-chat-tab {
+  padding: 7px 13px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fm-chat-tab-active {
+  background: var(--fm-chat-accent);
+  color: #fff;
+}
+.fm-chat-field {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.8px;
+}
+.fm-chat-field:focus {
+  outline: none;
+  border-color: var(--fm-chat-accent);
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   The assistant as an APP, not a widget
+
+   On a phone this is full screen (the sheet rule above), so it stops being a
+   box in the corner of a website and becomes the only thing on the glass. It
+   then has to carry its own weight the way a support chat in any delivery app
+   does: say who you are talking to, show that someone is there, group the
+   suggestions, time the messages, and put the controls where a thumb is.
+
+   Everything below layers onto the existing classes; nothing above is
+   replaced, so the desktop widget keeps working exactly as it did.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ---- the header: who you are talking to ---- */
+
+/* The app paints under the status bar (viewport-fit=cover), so the header
+   starts below it rather than behind the clock. */
+.is-app .fm-chat-panel {
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--fm-chat-accent);
+}
+.is-app .fm-chat-head {
+  padding-top: 12px;
+}
+
+.fm-chat-head-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 15px;
+}
+.fm-chat-head p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The "someone is there" dot. It pulses slowly: a static dot reads as a
+   decoration, a pulsing one reads as a state. */
+.fm-chat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+  animation: fm-chat-pulse 2.4s ease-out infinite;
+}
+@keyframes fm-chat-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(74, 222, 128, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+  }
+}
+
+/* ---- the thread ---- */
+
+/* Conversations start at the bottom. Without this a short thread floats at
+   the top of a tall phone screen with a field of empty space under it, which
+   is the single clearest sign of a chat that was designed for a desktop
+   corner. `margin-top: auto` on a flex pseudo-element pushes the content down
+   while leaving scrolling untouched. */
+.fm-chat-body.is-thread::before {
+  content: "";
+  margin-top: auto;
+}
+
+.fm-chat-line {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  /* Each message arrives rather than appearing. 160ms is under the threshold
+     where an animation starts to feel like waiting. */
+  animation: fm-chat-rise 0.16s ease-out;
+}
+.fm-chat-line.is-me {
+  justify-content: flex-end;
+}
+@keyframes fm-chat-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.fm-chat-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 82%;
+}
+.fm-chat-line.is-me .fm-chat-stack {
+  align-items: flex-end;
+}
+
+/* The assistant's face, beside what it says. */
+.fm-chat-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 18px; /* sits level with the bubble, not with the timestamp */
+  border-radius: 50%;
+  background: var(--fm-chat-accent);
+  color: #fff;
+  font-size: 11px;
+}
+
+/* Inside a row the bubble no longer needs to align itself. */
+.fm-chat-line .fm-chat-msg {
+  max-width: 100%;
+  align-self: auto;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.fm-chat-time {
+  margin: 3px 4px 0;
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+/* The typing bubble, shaped like a message so the answer replaces it in
+   place rather than shifting the thread. */
+.fm-chat-line .fm-chat-typing {
+  margin-bottom: 18px;
+}
+
+/* ---- suggested replies ---- */
+
+.fm-chat-actions-label {
+  width: 100%;
+  margin: 2px 2px 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---- the composer ---- */
+
+.fm-chat-foot {
+  /* Clears the phone's gesture bar as well as the keyboard. */
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.fm-chat-input {
+  /* A pill, which is what every messaging app on the device uses. */
+  border-radius: 22px;
+  padding: 11px 16px;
+}
+.fm-chat-send {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.fm-chat-send:not(:disabled):active {
+  transform: scale(0.92);
+}
+/* Disabled should read as "nothing to send yet", not as "broken". */
+.fm-chat-send:disabled {
+  opacity: 0.3;
+}
+
+/* ---- phone-sized ---- */
+
+@media (max-width: 639px) {
+  /* Bigger text and roomier bubbles: a full screen can afford it, and 13px
+     body text on a phone is a squint. */
+  .fm-chat-msg {
+    font-size: 14.2px;
+    padding: 11px 14px;
+    border-radius: 16px;
+  }
+  .fm-chat-body {
+    padding: 16px 14px;
+    gap: 14px;
+  }
+  .fm-chat-input {
+    /* 16px or more, or iOS zooms the whole page when the field is focused. */
+    font-size: 16px;
+    min-height: 46px;
+  }
+  .fm-chat-send {
+    width: 46px;
+    height: 46px;
+  }
+  .fm-chat-head-btn {
+    /* A comfortable thumb target. */
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fm-chat-line,
+  .fm-chat-dot {
+    animation: none;
+  }
+}

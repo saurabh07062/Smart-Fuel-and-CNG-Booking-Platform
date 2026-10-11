@@ -21,11 +21,18 @@ const NoPage: React.ComponentType = () => null;
 // the vendor or admin consoles. The landing and login pages stay in the main
 // bundle: they are the first screen for most visits.
 // Public
-const Landing = WEBSITE ? lazy(() => import("@/pages/public/Landing")) : NoPage;
+// Both builds open on a landing page, but not the same one: the website's
+// marketing page, and a phone opening screen in the Android app.
+const Landing = WEBSITE
+  ? lazy(() => import("@/pages/public/Landing"))
+  : lazy(() => import("@/pages/public/AppLanding"));
 // Auth
 import Login from "@/pages/auth/Login";
 const Register = lazy(() => import("@/pages/auth/Register"));
 const VerifyEmail = lazy(() => import("@/pages/auth/VerifyEmail"));
+// Public in both builds and at every sign-in state: linked from the sign-in
+// and sign-up forms, from each console, and from the footer.
+const PrivacyPolicy = lazy(() => import("@/pages/public/PrivacyPolicy"));
 const ForgotPassword = lazy(() => import("@/pages/auth/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/auth/ResetPassword"));
 // Customer
@@ -35,7 +42,10 @@ const StationDetail = lazy(() => import("@/pages/customer/StationDetail"));
 const MyVehicles = lazy(() => import("@/pages/customer/MyVehicles"));
 const NearestPump = lazy(() => import("@/pages/customer/NearestPump"));
 const Booking = lazy(() => import("@/pages/customer/Booking"));
+const FleetBooking = lazy(() => import("@/pages/customer/FleetBooking"));
 const Confirmation = lazy(() => import("@/pages/customer/Confirmation"));
+// A demonstration screen: sample data on a timer, no server, no booking.
+const Simulation = lazy(() => import("@/pages/customer/Simulation"));
 // Vendor
 const VendorRegister = WEBSITE ? lazy(() => import("@/pages/vendor/VendorRegister")) : NoPage;
 const VendorSecretCode = WEBSITE ? lazy(() => import("@/pages/vendor/VendorSecretCode")) : NoPage;
@@ -58,8 +68,7 @@ function HomeRoute() {
   const verify = new URLSearchParams(search).get("verify");
   if (verify) return <VerifyEmail token={verify} />;
   if (isAuthenticated) return <Navigate to={authDestination(user)} replace />;
-  // The customer app opens straight on sign-in; the landing page is for the website.
-  return WEBSITE ? <Landing /> : <Navigate to="/login" replace />;
+  return <Landing />;
 }
 
 /**
@@ -118,6 +127,10 @@ export default function AppRoutes() {
           signs every device out anyway (ResetPassword.tsx). */}
       <Route path="/reset-password" element={<ResetPassword />} />
 
+      {/* Always reachable: a privacy policy behind a sign-in would be no use
+          to someone deciding whether to sign up. */}
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+
       {/* The vendor sign-in page: an approved vendor reaches it signed out,
           from their email. Guest-only like /login -- a signed-in user pressing
           Back onto it goes to their own home instead of a sign-in form. The
@@ -146,6 +159,19 @@ export default function AppRoutes() {
           <ProtectedRoute>
             <RoleRoute allow={["customer"]}>
               <Dashboard />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Fleet booking: several vehicles in one visit. Its own address, and
+          its own page -- the single-vehicle flow at /booking is untouched. */}
+      <Route
+        path="/fleet-booking"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allow={["customer"]}>
+              <FleetBooking />
             </RoleRoute>
           </ProtectedRoute>
         }
@@ -212,6 +238,10 @@ export default function AppRoutes() {
 
       {/* Phase 6. A real address, recoverable from localStorage, so a refresh
           or a bookmark shows the last search instead of an empty page. */}
+      {/* Public on purpose: the demo needs no account, and it reaches
+          nothing that an account would protect. */}
+      <Route path="/simulation" element={<Simulation />} />
+
       <Route
         path="/nearest-pump"
         element={
@@ -306,6 +336,18 @@ function CustomerAppGate({ children }: { children: React.ReactNode }) {
   const role = useAuthStore((s) => s.user?.role);
   const logout = useAuthStore((s) => s.logout);
   if (WEBSITE) return <>{children}</>;
+
+  /**
+   * The privacy policy is never gated.
+   *
+   * It is a statement about what happens to a person's data, so it has to be
+   * readable before signing up, after signing out, and by an account this app
+   * will not otherwise serve. Without this, a vendor who opened it in the
+   * Android app got the "this app is for customers" wall instead of the
+   * policy -- the one document that must never be behind a door.
+   */
+  if (location.pathname.startsWith("/privacy")) return <>{children}</>;
+
   if (isAuthenticated && role && role !== "customer") {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 text-center">

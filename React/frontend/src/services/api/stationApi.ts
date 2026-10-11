@@ -81,3 +81,48 @@ export async function fetchNearbyStations(
   });
   return data;
 }
+
+/**
+ * GET /api/v1/discovery/place -- what to call a point.
+ *
+ * The name comes from OpenStreetMap through the backend, which caches it and
+ * keeps inside the service's rate limit (backend services/station/reverseGeocode.js).
+ * It answers 200 with `name: null` when the point cannot be named, and this
+ * returns null on any failure too: a missing place name must never stop the
+ * page that only wanted a label.
+ */
+export async function fetchPlaceName(lat: number, lng: number): Promise<string | null> {
+  try {
+    const { data } = await apiClient.get<{ name: string | null }>("/v1/discovery/place", {
+      params: { lat, lng },
+    });
+    return data?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** One place the customer can pick when the device will not give a fix. */
+export interface PlaceMatch {
+  name: string | null;
+  label: string;
+  lat: number;
+  lng: number;
+  type: string | null;
+}
+
+/**
+ * GET /api/v1/discovery/search-place?q= -- type a place, get coordinates.
+ *
+ * The lookup runs on the server (backend services/station/placeSearch.js), so
+ * there is no third-party key in this bundle and the external service sees one
+ * client rather than every phone. It answers 200 with an empty list both for
+ * "nothing matched" and for a failed lookup, because the customer does the
+ * same thing in either case -- different words, or the map.
+ */
+export async function searchPlaces(query: string): Promise<PlaceMatch[]> {
+  const { data } = await apiClient.get<{ results?: PlaceMatch[] }>("/v1/discovery/search-place", {
+    params: { q: query },
+  });
+  return Array.isArray(data.results) ? data.results : [];
+}

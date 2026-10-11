@@ -54,6 +54,8 @@ export default function Stations() {
   const rawQuery = params.get("q") ?? "";
   const query = rawQuery.trim().toLowerCase();
   const [sort, setSort] = useState<SortKey>("distance");
+  /** The area searched while booking for someone else. */
+  const [placeQuery, setPlaceQuery] = useState(rawQuery);
   // Toggles on top of the fuel filter: only open stations, only short queues.
   const [openOnly, setOpenOnly] = useState(false);
   const [lowQueueOnly, setLowQueueOnly] = useState(false);
@@ -96,10 +98,65 @@ export default function Stations() {
 
   const openCount = visible.filter((s) => s.open).length;
   const hasDistance = stations.some((s) => s.distance != null);
-  const clearSearch = () => setParams({}, { replace: true });
+  /**
+   * "Book for someone else" arrives here first, because the pump they need
+   * may be nowhere near this customer -- a person in Mumbai booking a slot
+   * in Pune. Their own GPS cannot answer that, so they search for the place
+   * by name and pick the pump themselves, and the flag rides along into the
+   * booking wizard.
+   */
+  const forSomeoneElse = params.get("forSomeoneElse") === "1";
+  const bookingQuery = forSomeoneElse ? "forSomeoneElse=1" : "";
+  const keepFlag = (): Record<string, string> => (forSomeoneElse ? { forSomeoneElse: "1" } : {});
+  const clearSearch = () => setParams(keepFlag(), { replace: true });
 
   return (
     <Layout>
+      {/* Booking for another person, possibly in another city: say so, and
+          point at the search rather than at their own location. */}
+      {forSomeoneElse && (
+        <div
+          className="cx-panel flex items-start gap-3 px-4 py-3 mb-4"
+          style={{ borderColor: "var(--primary)" }}
+          data-testid="for-someone-else-banner"
+        >
+          <span className="cx-stat-icon cx-tone-brand" style={{ width: 40, height: 40, flex: "0 0 auto" }}>
+            <i className="fas fa-user-group" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold" style={{ color: "var(--text)" }}>
+              Booking for someone else
+            </p>
+            <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+              Search the city or area where <b>they</b> will fill — your own location does not decide this — then
+              Book Now on that pump. Their name is asked on the next screen.
+            </p>
+            {/* Its own search box: the header's one would drop the flag, and
+                this is the search that matters here. */}
+            <form
+              className="flex gap-2 mt-2.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const q = placeQuery.trim();
+                setParams(q ? { q, forSomeoneElse: "1" } : { forSomeoneElse: "1" }, { replace: true });
+              }}
+            >
+              <input
+                className="input-field"
+                style={{ maxWidth: 280 }}
+                placeholder="City, area or pump name"
+                aria-label="Search the area where they will fill"
+                value={placeQuery}
+                onChange={(e) => setPlaceQuery(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary btn-sm">
+                <i className="fas fa-magnifying-glass" aria-hidden /> Search
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="cx-page-head">
         <div className="min-w-0">
           <h1 className="cx-title">Find fuel stations</h1>
@@ -205,7 +262,7 @@ export default function Stations() {
               />
             </section>
           ) : (
-            visible.map((s, i) => <StationCard key={s.id} station={s} index={i} />)
+            visible.map((s, i) => <StationCard key={s.id} station={s} index={i} bookingQuery={bookingQuery} />)
           )}
         </div>
 

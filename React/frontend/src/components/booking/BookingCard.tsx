@@ -5,6 +5,7 @@ import { formatCurrency, fuelColors } from "@/utils/format";
 import { resolveBookingStation } from "@/utils/station";
 import { getVehicleIcon } from "@/utils/vehicle";
 import { bookingRef, paymentState, PAYMENT_TONE_COLOR } from "@/utils/payment";
+import QueueInfoCard from "./QueueInfoCard";
 
 interface Props {
   booking: Booking;
@@ -43,6 +44,11 @@ export default function BookingCard({ booking: b, stations = [], onCancel }: Pro
         <div className="cx-row-sub">
           {b.bookingDate} · {b.timeSlot} · {b.fuelType} · {b.quantity}L
         </div>
+        {b.queueInfo && b.status === "upcoming" && (
+          <div className="cx-row-sub mt-0.5">
+            <QueueInfoCard info={b.queueInfo} compact />
+          </div>
+        )}
         {vehicle && (
           <div className="cx-row-sub flex items-center gap-1.5 mt-0.5">
             <i className={`fas ${getVehicleIcon(b.vehicleType || "Car")} text-[10px]`} aria-hidden />

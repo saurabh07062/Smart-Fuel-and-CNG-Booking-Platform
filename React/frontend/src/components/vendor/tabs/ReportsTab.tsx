@@ -5,6 +5,7 @@ import type { VendorForecast } from "@/services/api/vendorApi";
 import { toApiError } from "@/services/api/apiClient";
 import { formatINR } from "@/utils/vendorFormat";
 import { VendorLoadPrompt, VendorStatCard } from "../VendorBits";
+import DataTable from "@/components/common/DataTable";
 
 const METHOD_LABEL: Record<string, string> = {
   "moving-average": "Average of complete months",
@@ -89,26 +90,23 @@ export default function ReportsTab() {
         <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
           <i className="fas fa-gas-pump text-indigo-400" aria-hidden /> Station Performance
         </h3>
-        <div className="w-full overflow-x-auto">
-          <table className="vm-table">
-            <thead>
-              <tr>
-                <th className="px-6 py-3 font-bold">Station</th>
-                <th className="px-6 py-3 font-bold">Bookings</th>
-                <th className="px-6 py-3 font-bold">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(r.stationPerformance ?? []).map((s) => (
-                <tr key={s.stationName}>
-                  <td className="px-6 py-3 font-bold vm-text">{s.stationName}</td>
-                  <td className="px-6 py-3 font-mono">{s.totalBookings}</td>
-                  <td className="px-6 py-3 font-mono text-emerald-400">{formatINR(s.revenue)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          label="Station performance"
+          rows={r.stationPerformance ?? []}
+          rowKey={(s) => s.stationName}
+          testId="vendor-station-performance"
+          empty="No station activity in this period."
+          columns={[
+            { key: "station", header: "Station", cell: (s) => <span className="font-bold vm-text">{s.stationName}</span> },
+            { key: "bookings", header: "Bookings", align: "right", cell: (s) => <span className="font-mono">{s.totalBookings}</span> },
+            {
+              key: "revenue",
+              header: "Revenue",
+              align: "right",
+              cell: (s) => <span className="font-mono text-emerald-400">{formatINR(s.revenue)}</span>,
+            },
+          ]}
+        />
       </div>
     </>
   );

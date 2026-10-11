@@ -9,6 +9,8 @@ import { toApiError } from "@/services/api/apiClient";
 import { validateImageFile } from "@/utils/vehicle";
 import { pushToast } from "@/store/toastStore";
 import { selectUnreadCount, useNotificationStore } from "@/store/notificationStore";
+import BackendStatus from "@/components/common/BackendStatus";
+import { IS_NATIVE_BUILD } from "@/services/api/serverAddress";
 import { addRecentSearch, clearRecentSearches, getRecentSearches } from "@/utils/recentSearches";
 
 interface Props {
@@ -261,6 +263,11 @@ export default function TopHeader({ title, subtitle, onRefresh }: Props) {
               <i className="fas fa-calendar-plus" aria-hidden /> Book Fuel
             </button>
           )}
+
+          {/* In the app, whether the server is actually answering is the
+              first thing worth knowing; on the website the page itself came
+              from that server, so there is nothing to report. */}
+          {IS_NATIVE_BUILD && <BackendStatus compact />}
 
           <div className="relative" ref={bellRef}>
             <button

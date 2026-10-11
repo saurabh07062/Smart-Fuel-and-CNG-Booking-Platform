@@ -78,7 +78,7 @@ export default function SlotTimings({ station }: { station: VendorStation }) {
   const input = "vm-bg-surface border vm-border rounded-md px-2 py-1 text-xs vm-text";
 
   return (
-    <div className="vm-bg-ground rounded-lg border vm-border p-3 mb-4" data-testid="slot-timings">
+    <div className="vm-bg-ground rounded-lg border vm-border p-3 mb-3" data-testid="slot-timings">
       <div className="flex items-center justify-between gap-2 mb-2">
         <p className="text-[10px] vm-text-muted uppercase font-bold">
           <i className="fas fa-clock mr-1" aria-hidden /> Slot timings
@@ -99,57 +99,64 @@ export default function SlotTimings({ station }: { station: VendorStation }) {
           </div>
         )}
       </div>
-      <p className="text-[11px] vm-text-muted mb-3">Customers can book 30-minute slots only while the station is open.</p>
-      <div className="space-y-2">
+      <p className="text-[11px] vm-text-muted mb-2">Customers can book 30-minute slots only while the station is open.</p>
+      <div className="space-y-1">
         {SCHEDULE_DAYS.map((day) => {
           const d = value[day];
           const mode = modeOf(d);
           const label = `${day[0].toUpperCase()}${day.slice(1, 3)}`;
           return (
-            <div key={day} data-testid={`slot-day-${day}`}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold w-10">{label}</span>
+            // One line per day: day, mode, times, summary, "Apply to all".
+            <div
+              key={day}
+              data-testid={`slot-day-${day}`}
+              className="vm-slot-row"
+            >
+              <>
+                <span className="text-xs font-bold">{label}</span>
                 <select
                   aria-label={`${day} hours`}
                   value={mode}
                   onChange={(e) => setMode(day, e.target.value as Mode)}
-                  className={input}
+                  className={`${input} w-full`}
                 >
                   <option value="24h">24 hours</option>
                   <option value="hours">Set hours</option>
                   <option value="closed">Closed</option>
                 </select>
-                {mode === "hours" && (
-                  <>
-                    <input
-                      type="time"
-                      step={1800}
-                      aria-label={`${day} opening time`}
-                      value={d.open}
-                      onChange={(e) => setDay(day, { open: e.target.value })}
-                      className={input}
-                    />
-                    <span className="text-[11px] vm-text-muted">to</span>
-                    <input
-                      type="time"
-                      step={1800}
-                      aria-label={`${day} closing time`}
-                      value={d.close}
-                      onChange={(e) => setDay(day, { close: e.target.value })}
-                      className={input}
-                    />
-                  </>
-                )}
+                <span className="flex items-center gap-1.5">
+                  {mode === "hours" && (
+                    <>
+                      <input
+                        type="time"
+                        step={1800}
+                        aria-label={`${day} opening time`}
+                        value={d.open}
+                        onChange={(e) => setDay(day, { open: e.target.value })}
+                        className={`${input} w-[104px]`}
+                      />
+                      <span className="text-[11px] vm-text-muted">to</span>
+                      <input
+                        type="time"
+                        step={1800}
+                        aria-label={`${day} closing time`}
+                        value={d.close}
+                        onChange={(e) => setDay(day, { close: e.target.value })}
+                        className={`${input} w-[104px]`}
+                      />
+                    </>
+                  )}
+                </span>
+                <p className="text-[11px] vm-text-muted truncate">{mode === "hours" ? "" : daySummary(d)}</p>
                 <button
                   type="button"
                   onClick={() => applyToAll(day)}
-                  className="text-[10px] vm-text-muted underline"
+                  className="text-[10px] vm-text-muted underline whitespace-nowrap"
                   title="Use these hours for every day"
                 >
                   Apply to all
                 </button>
-              </div>
-              <p className="text-[11px] vm-text-muted mt-0.5 ml-12">{daySummary(d)}</p>
+              </>
             </div>
           );
         })}

@@ -1,0 +1,1 @@
+function t(e){return(e==null?void 0:e.distanceType)==="fixed"?"by road (Google Maps)":(e==null?void 0:e.distanceType)==="road"?"by road":(e==null?void 0:e.distanceType)==="straight"?"straight line":null}export{t as d};

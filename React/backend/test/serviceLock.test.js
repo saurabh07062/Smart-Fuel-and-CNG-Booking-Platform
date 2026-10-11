@@ -17,6 +17,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const mongoose = require("mongoose");
 const { simulateNozzleLine } = require("../src/services/queue/stationQueue");
+const { arriveAtPump } = require("./helpers/arriveAtPump");
 
 test.after(async () => {
   await require("../src/services/core/lock").close();
@@ -187,6 +188,8 @@ test("nozzle lock against MongoDB", async (t) => {
 
     await t.test("PIN scan and vendor start both go through the lock: busy nozzle -> 200, waiting", async () => {
       const scanned = await book(5);
+      // The PIN only works once the customer has checked in at the pump.
+      await arriveAtPump(scanned._id);
       const r = res();
       await bookingController.verifyBooking(
         { body: { bookingId: String(scanned._id) }, user: { id: String(vendor._id), role: "admin" }, app: { get: () => null } },
@@ -200,6 +203,7 @@ test("nozzle lock against MongoDB", async (t) => {
       assert.equal((await reload(scanned)).paymentStatus, "due_at_station", "still owed after the scan");
 
       const started = await book(6);
+      await arriveAtPump(started._id);
       const vr = res();
       await vendorPanel.updateBookingStatus(
         {

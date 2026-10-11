@@ -10,6 +10,8 @@ import { bookingRef, canCollectAtPump, paymentState, PAYMENT_TONE_COLOR } from "
 import { VendorEmpty, VendorHeading } from "../VendorBits";
 import WalkInPanel from "../WalkInPanel";
 import CollectPaymentModal, { type CollectionMethod } from "../CollectPaymentModal";
+import QueueInfoCard from "@/components/booking/QueueInfoCard";
+import DataTable, { type Column } from "@/components/common/DataTable";
 
 const STATUS_CLS: Record<string, string> = {
   completed: "bg-emerald-900/30 text-emerald-400",
@@ -67,7 +69,22 @@ export default function BookingsTab() {
     }
     setCheckingIn(true);
     try {
-      const r = await api.checkInWithCode(code);
+      let r;
+      try {
+        r = await api.checkInWithCode(code);
+      } catch (first) {
+        // Someone who checked in at the pump earlier ("Check In at Petrol
+        // Pump") is still waiting: serve them first, or go ahead on purpose.
+        const e = toApiError(first);
+        if (e.reason !== "EARLIER_ARRIVAL") throw first;
+        if (!window.confirm(`${e.msg}
+
+Continue with this customer anyway?`)) {
+          pushToast("Not started. Serve the customer who arrived first.", "info");
+          return;
+        }
+        r = await api.checkInWithCode(code, { override: true });
+      }
       pushToast(r.msg || (r.queued ? "Checked in. Waiting for the nozzle." : "Fueling started."), r.queued ? "info" : "success");
       setCode("");
       // The car is at the pump (fueling, or waiting for the nozzle) on a
@@ -122,6 +139,210 @@ export default function BookingsTab() {
       setCollectBusy(false);
     }
   };
+
+  /**
+   * The booking columns.
+   *
+   * Defined here rather than at module scope because each one needs the two
+   * handlers above, and threading them through a factory argument list was
+   * longer than the closure.
+   *
+   * What drops on a phone: fuel and payment. Everything else is either the
+   * identity of the row (reference, customer, vehicle), the number the vendor
+   * is reading it for (amount), the state it is in, or the button they came
+   * to press — and a table that hides the button is worse than one that
+   * scrolls.
+   */
+  const columns: Column<VendorBooking>[] = [
+    {
+      key: "booking",
+      header: "Booking",
+      cell: (b) => (
+        <>
+          <p className="font-mono text-xs font-bold vm-text" title={String(b._id)}>
+            {bookingRef(b)}
+          </p>
+          <p className="text-xs vm-text-muted">
+            {b.bookingDate ? `${b.bookingDate} · ${b.timeSlot || ""}` : formatDate(b.createdAt)}
+          </p>
+          {b.queueInfo && b.status === "upcoming" && (
+            <QueueInfoCard info={b.queueInfo} compact className="vm-text-muted mt-0.5" />
+          )}
+          {b.stationCheckInAt && b.status === "upcoming" && !b.arrivalTime && (
+            <p className="text-[11px] font-bold text-emerald-400 mt-0.5" data-testid="arrived-tag">
+              <i className="fas fa-location-dot mr-1" aria-hidden />
+              Arrived {new Date(b.stationCheckInAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+            </p>
+          )}
+        </>
+      ),
+    },
+    {
+      key: "customer",
+      header: "Customer",
+      cell: (b) => {
+        const customer = typeof b.user === "object" && b.user ? b.user : null;
+        return (
+          <>
+            <p className="font-bold vm-text">{customer?.name || "Unknown"}</p>
+            <p className="text-xs vm-text-muted">{customer?.phone || ""}</p>
+            {/* Booked for someone else: the person who will actually arrive,
+                so the fill is handed to the right one. */}
+            {b.bookedForName && (
+              <p className="text-[11px] font-semibold text-amber-400 mt-0.5" data-testid="booked-for-tag">
+                <i className="fas fa-user-group mr-1" aria-hidden />
+                Coming: {b.bookedForName}
+                {b.bookedForPhone ? ` · ${b.bookedForPhone}` : ""}
+              </p>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      key: "vehicle",
+      header: "Vehicle",
+      cell: (b) => (
+        <>
+          <p className="text-sm vm-text">{b.vehiclePlate || "—"}</p>
+          <p className="text-xs vm-text-muted">{b.vehicleName || b.vehicleType || ""}</p>
+          {/* One of a group booked together, and which one. */}
+          {b.fleetGroup && typeof b.fleetGroup === "object" && (
+            <p className="text-[10px] font-bold vm-text-muted mt-0.5" title={b.fleetGroup.reference}>
+              <i className="fas fa-truck-fast mr-1" aria-hidden />
+              Fleet {b.fleetIndex ?? "?"}
+              {b.fleetGroup.vehicleCount ? " of " + b.fleetGroup.vehicleCount : ""}
+            </p>
+          )}
+        </>
+      ),
+    },
+    {
+      key: "fuel",
+      header: "Fuel",
+      hideOnPhone: true,
+      cell: (b) => {
+        const unit = unitOf(b.fuelType);
+        return (
+          <>
+            <p className="text-sm vm-text">
+              {b.fuelType || "N/A"} · {b.quantity || 0} {unit}
+            </p>
+            {typeof b.price === "number" && (
+              <p className="text-xs vm-text-muted">
+                {formatINR(b.price)}/{unit}
+              </p>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      cell: (b) => <span className="font-mono text-emerald-400">{formatINR(b.amount || 0)}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (b) => {
+        // Checked in at the pump while the nozzle is busy: the backend starts
+        // this car automatically when the nozzle is released.
+        const waitingAtPump = b.status === "upcoming" && Boolean(b.arrivalTime);
+        const cls = waitingAtPump
+          ? "bg-yellow-900/30 text-yellow-400"
+          : (STATUS_CLS[b.status] ?? "bg-yellow-900/30 text-yellow-400");
+        const label =
+          b.status === "serving" ? "In Progress" : waitingAtPump ? "At pump · waiting" : b.status || "unknown";
+        return (
+          <>
+            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${cls}`}>{label}</span>
+            {b.status === "serving" && <FuelingTimer booking={b} />}
+          </>
+        );
+      },
+    },
+    {
+      key: "payment",
+      header: "Payment",
+      hideOnPhone: true,
+      cell: (b) => {
+        const payment = paymentState(b);
+        return (
+          <span className="text-xs font-bold" style={{ color: PAYMENT_TONE_COLOR[payment.tone] }}>
+            {payment.label}
+          </span>
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      cell: (b) => {
+        const ref = bookingRef(b);
+        const waitingAtPump = b.status === "upcoming" && Boolean(b.arrivalTime);
+        return (
+          <div className="flex items-center gap-1 flex-wrap">
+            {b.status === "upcoming" && (
+              <>
+                {waitingAtPump ? (
+                  <span
+                    title="Checked in. Starts automatically when the nozzle is released"
+                    className="w-8 h-8 rounded-lg text-yellow-400 border border-yellow-700/50 inline-flex items-center justify-center"
+                  >
+                    <i className="fas fa-hourglass-half text-xs" aria-hidden />
+                  </span>
+                ) : (
+                  // Fuelling cannot start before the customer has checked in
+                  // at the pump; the server refuses it, so the button says so
+                  // first instead of failing on the click.
+                  <button
+                    onClick={() => void setStatus(String(b._id), "serving")}
+                    disabled={!b.stationCheckInAt}
+                    title={b.stationCheckInAt ? "Start Fueling" : "Waiting for the customer to check in at the pump"}
+                    aria-label="Start fueling"
+                    className="w-8 h-8 rounded-lg vm-accent-text border border-blue-700/50 transition-colors inline-flex items-center justify-center"
+                    style={b.stationCheckInAt ? undefined : { opacity: 0.4, cursor: "not-allowed" }}
+                  >
+                    <i className="fas fa-gas-pump text-xs" aria-hidden />
+                  </button>
+                )}
+                <button
+                  onClick={() => void setStatus(String(b._id), "cancelled")}
+                  title="Reject"
+                  aria-label="Reject booking"
+                  className="w-8 h-8 rounded-lg bg-red-600/20 text-red-400 border border-red-700/50 transition-colors inline-flex items-center justify-center"
+                >
+                  <i className="fas fa-times text-xs" aria-hidden />
+                </button>
+              </>
+            )}
+            {b.status === "completed" && (
+              <a
+                href={`/api/invoices/${String(b._id)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open invoice for ${ref}`}
+                className="h-8 px-2 rounded-lg vm-accent-text border border-blue-700/50 transition-colors inline-flex items-center gap-1 text-[11px] font-bold"
+              >
+                <i className="fas fa-file-invoice text-xs" aria-hidden /> Invoice
+              </a>
+            )}
+            {canCollectAtPump(b) && (
+              <button
+                onClick={() => void collect(b)}
+                aria-label={`Collect payment for ${ref}`}
+                className="h-8 px-2 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-700/50 transition-colors inline-flex items-center gap-1 text-[11px] font-bold"
+              >
+                <i className="fas fa-hand-holding-dollar text-xs" aria-hidden /> Collect {formatINR(b.amount || 0)}
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
 
   const collectModal = (
     <CollectPaymentModal
@@ -206,6 +427,12 @@ export default function BookingsTab() {
             <p className="text-xs vm-text-muted">
               Enter their 4-digit code. Fueling starts and completes automatically (Petrol/Diesel 40 s, CNG 5 min).
             </p>
+            {/* The rule the server enforces, said before they type it. */}
+            <p className="text-[11px] vm-text-muted mt-1">
+              <i className="fas fa-circle-info mr-1" aria-hidden />
+              The code works only after the customer has tapped <b>Check In at Petrol Pump</b> in their app — that is
+              what fixes who arrived first.
+            </p>
           </div>
         </div>
         <input
@@ -230,134 +457,14 @@ export default function BookingsTab() {
       {bookings.length === 0 ? (
         <VendorEmpty icon="fa-inbox" message="No bookings for this station yet." />
       ) : (
-        <div className="vm-bg-surface rounded-2xl border vm-border overflow-hidden">
-          <div className="w-full overflow-x-auto">
-            <table className="vm-table">
-              <thead>
-                <tr>
-                  <th>Booking</th>
-                  <th>Customer</th>
-                  <th>Vehicle</th>
-                  <th>Fuel</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Payment</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bookings.map((b) => {
-                  const customer = typeof b.user === "object" && b.user ? b.user : null;
-                  const ref = bookingRef(b);
-                  // Checked in at the pump while the nozzle is busy: the backend
-                  // starts this car automatically when the nozzle is released.
-                  const waitingAtPump = b.status === "upcoming" && Boolean(b.arrivalTime);
-                  const cls = waitingAtPump
-                    ? "bg-yellow-900/30 text-yellow-400"
-                    : (STATUS_CLS[b.status] ?? "bg-yellow-900/30 text-yellow-400");
-                  const label = b.status === "serving" ? "In Progress" : waitingAtPump ? "At pump · waiting" : b.status || "unknown";
-                  const payment = paymentState(b);
-                  const unit = unitOf(b.fuelType);
-                  return (
-                    <tr key={String(b._id)} data-testid={`booking-row-${b._id}`}>
-                      <td>
-                        <p className="font-mono text-xs font-bold vm-text" title={String(b._id)}>
-                          {ref}
-                        </p>
-                        <p className="text-xs vm-text-muted">
-                          {b.bookingDate ? `${b.bookingDate} · ${b.timeSlot || ""}` : formatDate(b.createdAt)}
-                        </p>
-                      </td>
-                      <td>
-                        <p className="font-bold vm-text">{customer?.name || "Unknown"}</p>
-                        <p className="text-xs vm-text-muted">{customer?.phone || ""}</p>
-                      </td>
-                      <td>
-                        <p className="text-sm vm-text">{b.vehiclePlate || "—"}</p>
-                        <p className="text-xs vm-text-muted">{b.vehicleName || b.vehicleType || ""}</p>
-                      </td>
-                      <td>
-                        <p className="text-sm vm-text">
-                          {b.fuelType || "N/A"} · {b.quantity || 0} {unit}
-                        </p>
-                        {typeof b.price === "number" && (
-                          <p className="text-xs vm-text-muted">
-                            {formatINR(b.price)}/{unit}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 font-mono text-emerald-400">{formatINR(b.amount || 0)}</td>
-                      <td>
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${cls}`}>
-                          {label}
-                        </span>
-                        {b.status === "serving" && <FuelingTimer booking={b} />}
-                      </td>
-                      <td>
-                        <span className="text-xs font-bold" style={{ color: PAYMENT_TONE_COLOR[payment.tone] }}>
-                          {payment.label}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {b.status === "upcoming" && (
-                            <>
-                              {waitingAtPump ? (
-                                <span
-                                  title="Checked in. Starts automatically when the nozzle is released"
-                                  className="w-8 h-8 rounded-lg text-yellow-400 border border-yellow-700/50 inline-flex items-center justify-center"
-                                >
-                                  <i className="fas fa-hourglass-half text-xs" aria-hidden />
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => void setStatus(String(b._id), "serving")}
-                                  title="Start Fueling"
-                                  aria-label="Start fueling"
-                                  className="w-8 h-8 rounded-lg vm-accent-text border border-blue-700/50 transition-colors inline-flex items-center justify-center"
-                                >
-                                  <i className="fas fa-gas-pump text-xs" aria-hidden />
-                                </button>
-                              )}
-                              <button
-                                onClick={() => void setStatus(String(b._id), "cancelled")}
-                                title="Reject"
-                                aria-label="Reject booking"
-                                className="w-8 h-8 rounded-lg bg-red-600/20 text-red-400 border border-red-700/50 transition-colors inline-flex items-center justify-center"
-                              >
-                                <i className="fas fa-times text-xs" aria-hidden />
-                              </button>
-                            </>
-                          )}
-                          {b.status === "completed" && (
-                            <a
-                              href={`/api/invoices/${String(b._id)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`Open invoice for ${ref}`}
-                              className="h-8 px-2 rounded-lg vm-accent-text border border-blue-700/50 transition-colors inline-flex items-center gap-1 text-[11px] font-bold"
-                            >
-                              <i className="fas fa-file-invoice text-xs" aria-hidden /> Invoice
-                            </a>
-                          )}
-                          {canCollectAtPump(b) && (
-                            <button
-                              onClick={() => void collect(b)}
-                              aria-label={`Collect payment for ${ref}`}
-                              className="h-8 px-2 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-700/50 transition-colors inline-flex items-center gap-1 text-[11px] font-bold"
-                            >
-                              <i className="fas fa-hand-holding-dollar text-xs" aria-hidden /> Collect {formatINR(b.amount || 0)}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <DataTable
+          label="Bookings at this station"
+          rows={bookings}
+          rowKey={(b) => String(b._id)}
+          rowTestId={(b) => `booking-row-${b._id}`}
+          testId="vendor-bookings"
+          columns={columns}
+        />
       )}
     </>
   );

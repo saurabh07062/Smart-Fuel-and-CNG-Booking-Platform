@@ -50,6 +50,7 @@ const vendorSecretCode = require("./services/vendor/vendorSecretCode");
 const User = require("./models/User");
 const { startBookingSweepJob, startInProgressSweepJob } = require("./services/booking/bookingSweep");
 const { startQueueClockJob } = require("./services/queue/stationQueue");
+const { startSettlementJob } = require("./services/commission/settlementJob");
 
 log.info("Starting", {
   env: process.env.NODE_ENV || "development",
@@ -61,7 +62,11 @@ log.info("Starting", {
 // Connect DB
 const dbLog = logger.child("mongodb");
 mongoose
-  .connect(process.env.MONGO_URI || "mongodb://localhost:27017/fuelmart")
+  // autoIndex off: Mongoose would otherwise build each model's indexes lazily,
+  // on that model's first query, and throw the result away -- so a unique index
+  // that could not be built (duplicate data) failed silently. They are built
+  // once, deliberately and with a report, just below.
+  .connect(process.env.MONGO_URI || "mongodb://localhost:27017/fuelmart", { autoIndex: false })
   // Where it connected: host, port and database only -- never the user or
   // password that MONGO_URI may carry.
   .then(() => {
@@ -72,12 +77,13 @@ mongoose
 mongoose.connection.on("disconnected", () => dbLog.warn("Disconnected"));
 mongoose.connection.on("reconnected", () => dbLog.info("Reconnected"));
 
-// The booking double-booking guard is a database index; make sure it exists
-// and say so loudly if existing data prevents building it.
-require("./models/Booking")
-  .init()
-  .then(() => dbLog.info("Booking indexes ready"))
-  .catch((err) => dbLog.error("Booking index build failed", { err }));
+// Every collection's indexes -- the unique guards that stop double bookings and
+// duplicate records, and the compound indexes the dashboards read through.
+// Failures are reported per collection and never stop the server
+// (services/core/schemaIndexes.js explains why).
+require("./services/core/schemaIndexes")
+  .ensureSchemaIndexes()
+  .catch((err) => dbLog.error("Index build could not run", { err }));
 
 const DEFAULT_PORT = process.env.PORT || 5000;
 const MAX_RETRIES = 5;
@@ -189,6 +195,16 @@ function startServer(port, retriesLeft) {
     runSecretCodeSweep();
     const secretCodeTimer = setInterval(runSecretCodeSweep, 60 * 60_000);
     if (typeof secretCodeTimer.unref === "function") secretCodeTimer.unref();
+
+    /**
+     * The day's commission, collected once a day at the configured time
+     * (services/commission/settlementJob.js).
+     *
+     * Safe on more than one server: one settlement per vendor per day is
+     * enforced by a unique index, so two processes waking at the same minute
+     * produce one settlement between them, not two transfers.
+     */
+    startSettlementJob();
 
     log.info("Ready");
   });

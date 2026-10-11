@@ -447,6 +447,7 @@ const ADMIN_EDITABLE = [
   "state",
   "openingHours",
   "operatingSchedule",
+  "contactPhone",
   "images",
   "fuelTypes",
   "amenities",
@@ -483,6 +484,17 @@ exports.updateStation = async (req, res) => {
 
     const station = await Station.findById(req.params.id);
     if (!station) return res.status(404).json({ msg: "Station not found" });
+
+    // A phone number is a phone number wherever it is typed: the same rule
+    // as every other one on the platform (services/validation/accountFields.js).
+    if (body.contactPhone !== undefined) {
+      const phone = require("../services/validation/accountFields").validatePhone(body.contactPhone, {
+        field: "contactPhone",
+        required: false,
+      });
+      if (!phone.ok) return res.status(400).json({ msg: phone.msg, field: "contactPhone" });
+      body.contactPhone = phone.value;
+    }
 
     const ignored = Object.keys(body).filter((k) => !ADMIN_EDITABLE.includes(k));
     for (const key of ADMIN_EDITABLE) {

@@ -1,4 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  addressProblem,
+  collectProblems,
+  confirmProblem,
+  emailProblem,
+  gstProblem,
+  nameProblem,
+  passwordProblem,
+  phoneProblem,
+} from "@/utils/accountFields";
 import { useNavigate } from "react-router-dom";
 import L from "leaflet";
 import { useLeafletMap, PUNE } from "@/hooks/useLeafletMap";
@@ -42,7 +52,60 @@ export default function VendorRegister() {
   const { containerRef, mapRef, ready } = useLeafletMap({ center: PUNE, zoom: 12 });
   const markerRef = useRef<L.Marker | null>(null);
 
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((p) => ({ ...p, [k]: e.target.value }));
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => {
+    const value = e.target.value;
+    setF((p) => ({ ...p, [k]: value }));
+    // Once a field has been corrected, stop showing the old complaint.
+    setErrors((p) => (p[k] ? { ...p, [k]: "" } : p));
+  };
+  const blur = (k: keyof typeof f) => () => setTouched((p) => ({ ...p, [k]: true }));
+
+  /**
+   * Every rule the server will apply (utils/accountFields.ts), checked here
+   * so the applicant is told before they upload documents and press Submit.
+   * The server checks all of it again -- this only decides what to show.
+   */
+  const problems = (): Record<string, string> =>
+    collectProblems({
+      businessName: nameProblem(f.businessName, { label: "Business name" }),
+      ownerName: nameProblem(f.ownerName, { label: "Owner name" }),
+      email: emailProblem(f.email),
+      pass: passwordProblem(f.pass),
+      passConfirm: confirmProblem(f.pass, f.passConfirm),
+      gst: gstProblem(f.gst),
+      address: addressProblem(f.address),
+      mobile: phoneProblem(f.mobile),
+    });
+
+  /** The fields each step owns, so Next only blocks on what is on screen. */
+  const STEP_FIELDS: Record<number, string[]> = {
+    1: ["businessName", "ownerName", "email", "pass", "passConfirm", "gst", "address", "mobile"],
+    2: [],
+    3: [],
+    4: [],
+  };
+
+  /** True when this step is clean; otherwise it marks and shows the problems. */
+  const stepIsValid = (which: number): boolean => {
+    const found = problems();
+    const mine = (STEP_FIELDS[which] ?? []).filter((k) => found[k]);
+    if (mine.length === 0) return true;
+    setErrors(found);
+    setTouched((p) => ({ ...p, ...Object.fromEntries(mine.map((k) => [k, true])) }));
+    pushToast(found[mine[0]], "error");
+    return false;
+  };
+
+  /** The message under a field: only after it has been touched. */
+  const fieldError = (k: string): string | null => (touched[k] ? errors[k] || null : null);
+  const errText = (k: string) => {
+    const msg = fieldError(k);
+    return msg ? (
+      <p role="alert" className="text-xs mt-1" style={{ color: "var(--danger, #dc2626)" }}>
+        {msg}
+      </p>
+    ) : null;
+  };
 
   function setMarker(lat: number, lng: number) {
     const map = mapRef.current;
@@ -73,6 +136,9 @@ export default function VendorRegister() {
 
   // At least one of Petrol, Diesel, CNG -- the vendor panel shows only the fuels chosen here.
   const [fuelError, setFuelError] = useState<string | null>(null);
+  /** Field -> what is wrong with it, shown under that field once touched. */
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const fuelsChosen = toVendorFuels(fuels).length > 0;
 
   function showStep(n: Step) {
@@ -110,7 +176,9 @@ export default function VendorRegister() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (step !== 4) {
-      // Enter in a field before the last step advances, as before.
+      // Enter in a field before the last step advances, as before -- but a
+      // step with a problem in it stays put and says what it is.
+      if (!stepIsValid(step)) return;
       showStep((step + 1) as Step);
       return;
     }
@@ -118,6 +186,17 @@ export default function VendorRegister() {
       showStep(4); // sends them back to step 2 with the message
       return;
     }
+    // The last gate before the upload: every field, not just this step's.
+    const found = problems();
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      setTouched((p) => ({ ...p, ...Object.fromEntries(Object.keys(found).map((k) => [k, true])) }));
+      pushToast(found[Object.keys(found)[0]], "error");
+      showStep(1);
+      return;
+    }
+    // Guard a second press while the first is in flight.
+    if (busy) return;
     setBusy(true);
     const data = new FormData();
     data.append("businessName", f.businessName);
@@ -153,6 +232,24 @@ export default function VendorRegister() {
     const r = await registerVendor(data);
     setBusy(false);
     if (!r.ok) {
+      // The API names the field it refused; put the message under it rather
+      // than leaving the applicant to guess which box was wrong.
+      const FIELD_TO_INPUT: Record<string, string> = {
+        name: "ownerName",
+        businessName: "businessName",
+        email: "email",
+        password: "pass",
+        confirmPassword: "passConfirm",
+        phone: "mobile",
+        gstNumber: "gst",
+        vendorAddress: "address",
+      };
+      const input = r.field ? FIELD_TO_INPUT[r.field] : undefined;
+      if (input) {
+        setErrors((p) => ({ ...p, [input]: r.msg }));
+        setTouched((p) => ({ ...p, [input]: true }));
+        showStep(1);
+      }
       pushToast(r.msg, "error");
       return;
     }
@@ -190,7 +287,14 @@ export default function VendorRegister() {
         <button type="button" className="px-6 py-2 border rounded-md" onClick={() => showStep(prev)}>← BACK</button>
       )}
       {next && (
-        <button type="button" className="ml-auto bg-black text-white px-6 py-2 rounded-md" onClick={() => showStep(next)}>
+        <button
+          type="button"
+          className="ml-auto bg-black text-white px-6 py-2 rounded-md"
+          onClick={() => {
+            if (next > step && !stepIsValid(step)) return;
+            showStep(next);
+          }}
+        >
           {nextLabel}
         </button>
       )}
@@ -254,33 +358,47 @@ export default function VendorRegister() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold mb-2">Legal Business Name *</label>
-                    <input className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-3 text-lg" required value={f.businessName} onChange={set("businessName")} />
+                    <input
+                      className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-3 text-lg"
+                      required
+                      value={f.businessName}
+                      onChange={set("businessName")}
+                      onBlur={blur("businessName")}
+                      aria-invalid={Boolean(fieldError("businessName"))}
+                    />
+                    {errText("businessName")}
                     <p className="text-xs text-[var(--muted)] mt-1">Must exactly match GST/VAT documentation.</p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold mb-2">Owner / Contact Name *</label>
-                      <input className={inputCls} required value={f.ownerName} onChange={set("ownerName")} />
+                      <input className={inputCls} required value={f.ownerName} onChange={set("ownerName")} onBlur={blur("ownerName")} aria-invalid={Boolean(fieldError("ownerName"))} />
+                      {errText("ownerName")}
                     </div>
                     <div>
                       <label className="block text-xs font-bold mb-2">Email Address *</label>
-                      <input type="email" className={inputCls} required value={f.email} onChange={set("email")} />
+                      <input type="email" className={inputCls} required value={f.email} onChange={set("email")} onBlur={blur("email")} aria-invalid={Boolean(fieldError("email"))} />
+                      {errText("email")}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold mb-2">Password *</label>
-                      <input type="password" className={inputCls} required value={f.pass} onChange={set("pass")} autoComplete="new-password" />
+                      <input type="password" className={inputCls} required value={f.pass} onChange={set("pass")} onBlur={blur("pass")} autoComplete="new-password" aria-invalid={Boolean(fieldError("pass"))} />
+                      {errText("pass")}
+                      <p className="text-xs text-[var(--muted)] mt-1">At least 8 characters.</p>
                     </div>
                     <div>
                       <label className="block text-xs font-bold mb-2">Confirm Password *</label>
-                      <input type="password" className={inputCls} required value={f.passConfirm} onChange={set("passConfirm")} autoComplete="new-password" />
+                      <input type="password" className={inputCls} required value={f.passConfirm} onChange={set("passConfirm")} onBlur={blur("passConfirm")} autoComplete="new-password" aria-invalid={Boolean(fieldError("passConfirm"))} />
+                      {errText("passConfirm")}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold mb-2">GSTIN / Tax ID</label>
-                      <input className={inputCls} value={f.gst} onChange={set("gst")} />
+                      <input className={inputCls} value={f.gst} onChange={set("gst")} onBlur={blur("gst")} placeholder="27ABCDE1234F1Z5" aria-invalid={Boolean(fieldError("gst"))} />
+                      {errText("gst")}
                     </div>
                     <div>
                       <label className="block text-xs font-bold mb-2">Business Type</label>
@@ -293,14 +411,24 @@ export default function VendorRegister() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold mb-2">Full Postal Address</label>
-                    <textarea rows={4} className={inputCls} value={f.address} onChange={set("address")} />
+                    <textarea rows={4} className={inputCls} value={f.address} onChange={set("address")} onBlur={blur("address")} aria-invalid={Boolean(fieldError("address"))} />
+                    {errText("address")}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold mb-2">Primary Contact Number</label>
                       <div className="flex">
                         <input value="+91" className="w-20 bg-[var(--muted-bg)] border border-[var(--border)] rounded-l-lg px-3 py-2" disabled />
-                        <input className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded-r-lg px-3 py-2" value={f.mobile} onChange={set("mobile")} />
+                        <input
+                          className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded-r-lg px-3 py-2"
+                          value={f.mobile}
+                          onChange={set("mobile")}
+                          onBlur={blur("mobile")}
+                          inputMode="numeric"
+                          maxLength={10}
+                          placeholder="10-digit mobile"
+                          aria-invalid={Boolean(fieldError("mobile"))}
+                        />
                       </div>
                     </div>
                     <div>

@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { serverBase } from "@/services/api/serverAddress";
 import { refreshSession } from "@/services/api/apiClient";
 import { tabId } from "@/utils/tabId";
 
@@ -58,10 +59,13 @@ export function getSocket(): Socket {
   // (store/authStore.ts): the session cookie is only read during the handshake.
   if (socket) return socket;
 
-  socket = io({
-    // Same origin: Vite proxies /socket.io in dev (ws: true), and in
-    // production the app is served from the backend's origin. The browser
-    // sends the httpOnly session cookie with the handshake by itself.
+  // Same origin on the web (Vite proxies /socket.io in dev; in production
+  // the app is served from the backend). The Android app's pages come from
+  // the device, so it must be told the server's address
+  // (services/api/serverAddress.ts).
+  const base = serverBase();
+
+  socket = io(base || undefined, {
     withCredentials: true,
     // This tab's own session cookie is used when it has one (utils/tabId.ts).
     auth: { tab: tabId() },

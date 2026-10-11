@@ -10,6 +10,7 @@
 const crypto = require("crypto");
 const Booking = require("../../models/Booking");
 const Station = require("../../models/Station");
+const { payableOf } = require("../payment/payMethod");
 const { waitlist } = require("../queue/waitlist");
 const { completeBooking, COMPLETABLE_STATUSES } = require("./bookingCompletion");
 const stockLedger = require("../inventory/stockLedger");
@@ -48,11 +49,11 @@ async function markServed({ bookingId, io, servedBy, collectPayment = true }) {
       set.paymentStatus = "paid";
       set.collectedBy = servedBy || null;
       set.collectedAt = new Date();
-      collected = { amount: existing.amount, method: "station" };
+      collected = { amount: payableOf(existing), method: "station" };
     } else {
       // Vendor explicitly served without collecting — leave it owed rather
       // than silently marking it paid.
-      collected = { amount: existing.amount, method: "station", outstanding: true };
+      collected = { amount: payableOf(existing), method: "station", outstanding: true };
     }
   }
 

@@ -1,8 +1,24 @@
 import { useVendorStore } from "@/store/vendorStore";
 import { formatINR } from "@/utils/vendorFormat";
 import { VendorLoadPrompt, VendorStatCard } from "../VendorBits";
+import { ChartCard, DonutChart, LineChart } from "@/components/admin/charts/Charts";
 
 const unitOf = (fuel: string) => (fuel.toLowerCase() === "cng" ? "kg" : "L");
+
+/**
+ * One colour per fuel, from the tokens.
+ *
+ * Fixed rather than taken in order, so Petrol is the same colour on the
+ * vendor's ring as on a station card, and dark mode is handled by the token
+ * rather than by this file.
+ */
+const fuelColour = (fuel: string) => {
+  const key = fuel.toLowerCase();
+  if (key === "cng") return "var(--fuel-cng)";
+  if (key === "diesel") return "var(--fuel-diesel)";
+  if (key === "petrol") return "var(--fuel-petrol)";
+  return "var(--chart-4)";
+};
 
 /**
  * Port of renderVendorRevenueTab().
@@ -32,6 +48,9 @@ export default function RevenueTab() {
   // Guard the divisor: an all-zero month would otherwise make every bar NaN%.
   const maxRevenue = Math.max(...fuelSales.map(([, v]) => v.revenue), 1);
   const tx = r.transactions ?? { today: 0, week: 0, month: 0, allTime: 0 };
+  // Absent on an older server, and absent in a month with no sales at all;
+  // either way the trend panel simply does not render.
+  const weeks = r.weeks ?? [];
   const awaiting = r.awaitingCollection ?? { count: 0, amount: 0 };
 
   return (
@@ -63,10 +82,54 @@ export default function RevenueTab() {
         />
       </div>
 
+      {/*
+        This month, week by week.
+
+        The server has computed these buckets all along (revenueWeeksThisMonth)
+        and only the admin dashboard was ever given them, so a vendor could see
+        four totals and no direction. A trend is the first thing somebody
+        running a pump wants from a revenue page.
+      */}
+      {weeks.length > 0 && (
+        <div className="mb-6">
+          <ChartCard
+            title="Revenue this month"
+            icon="fa-chart-line"
+            subtitle="Week by week, from completed bookings whose payment was received."
+            testId="vendor-revenue-trend"
+          >
+            <LineChart
+              points={weeks.map((w) => ({ label: w.label, value: w.revenue }))}
+              colour="var(--chart-1)"
+              format={(v) => formatINR(v)}
+              ariaLabel="Revenue by week this month"
+            />
+          </ChartCard>
+        </div>
+      )}
+
       <div className="vm-bg-surface rounded-2xl border vm-border p-6 mb-6">
         <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
           <i className="fas fa-chart-bar vm-accent-text" aria-hidden /> Fuel Sales Breakdown (This Month)
         </h3>
+        {/*
+          A split is a share of a whole, which is what a ring shows and a row
+          of bars does not. The bars stay underneath: they carry the litres
+          and the transaction count, which the ring cannot. One fuel is not a
+          split, so the ring only appears when there is something to compare.
+        */}
+        {fuelSales.length > 1 && (
+          <div className="mb-6">
+            {/* centreLabel is the noun under the total the ring prints
+                itself, the way the admin donuts read ("stations",
+                "bookings") -- not the amount again. */}
+            <DonutChart
+              slices={fuelSales.map(([fuel, data]) => ({ label: fuel, value: data.revenue, colour: fuelColour(fuel) }))}
+              centreLabel="rupees"
+              ariaLabel="Revenue by fuel this month"
+            />
+          </div>
+        )}
         {fuelSales.length === 0 ? (
           <p className="vm-text-muted text-sm text-center py-8">No paid sales this month yet</p>
         ) : (

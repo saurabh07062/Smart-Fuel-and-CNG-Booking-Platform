@@ -25,6 +25,7 @@
 // single character; bank handles are alphabetic-initial and never 1 char.
 // Deliberately permissive on the user part — rejecting a legitimate VPA is a
 // worse failure than accepting one the bank will reject anyway.
+const { payableOf } = require("./payMethod");
 const VPA_RE = /^[a-zA-Z0-9.\-_]{1,256}@[a-zA-Z][a-zA-Z0-9.\-_]{1,64}$/;
 
 function isValidVpa(vpa) {
@@ -166,7 +167,7 @@ async function buildBookingPayment(booking, station) {
   const built = buildUpiUri({
     vpa: payee.vpa,
     payeeName: payee.payeeName,
-    amount: booking.amount,
+    amount: payableOf(booking),
     note: `FuelMart ${booking.verificationCode || ""}`.trim(),
     ref: booking.verificationCode || String(booking._id || ""),
   });
@@ -179,7 +180,7 @@ async function buildBookingPayment(booking, station) {
     qrDataUri: await toQrDataUri(built.uri),
     vpa: payee.vpa,
     payeeName: payee.payeeName,
-    amount: booking.amount,
+    amount: payableOf(booking),
     currency: "INR",
     reference: sanitiseRef(booking.verificationCode || String(booking._id || "")),
     source: payee.source,

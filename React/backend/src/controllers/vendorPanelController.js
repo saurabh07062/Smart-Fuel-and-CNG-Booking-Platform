@@ -54,6 +54,11 @@ function asArray(value) {
 }
 const Station = require("../models/Station");
 const Booking = require("../models/Booking");
+// Registers the model so `.populate("fleetGroup")` below can resolve it.
+// Mongoose looks a populated model up by name at query time, and a name is
+// only registered by requiring the file that defines it -- a controller that
+// imports its models one by one has to import this one too.
+require("../models/FleetBooking");
 const PriceHistory = require("../models/PriceHistory");
 const Employee = require("../models/Employee");
 const { classifyStationInventory, ALERT_TIERS } = require("../services/inventory/inventoryThreshold");
@@ -938,9 +943,14 @@ exports.getStationBookings = async (req, res) => {
 
     const bookings = await Booking.find(query)
       .populate("user", "name phone email")
+      // So the attendant can see that this van is one of five the same
+      // customer booked together, and in what order.
+      .populate("fleetGroup", "reference vehicleCount")
       .sort({ createdAt: -1 });
 
-    res.json(bookings);
+    // Vehicles ahead, position, wait and start for each active booking: the
+    // same figures the customer sees (services/queue/queueInfo.js).
+    res.json(await require("../services/queue/queueInfo").withQueueInfo(bookings));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error fetching bookings" });
@@ -1017,6 +1027,19 @@ exports.updateBookingStatus = async (req, res) => {
         if (collected.booking) booking = collected.booking;
       }
     } else if (status === "serving") {
+      // Starting by hand is still starting: the same rule as the PIN applies,
+      // or this button would be the way around it.
+      //
+      // A fill may only begin for a customer who has tapped "Check In at
+      // Petrol Pump" and is therefore actually at the station -- that is what
+      // fixes the arrival order between two people holding the same slot.
+      if (!booking.stationCheckInAt) {
+        return res.status(409).json({
+          reason: "NOT_CHECKED_IN",
+          msg: 'Ask the customer to tap "Check In at Petrol Pump" in their app first. Fuelling can start once they have checked in here.',
+        });
+      }
+
       // Starting service by hand (no scan) is a check-in at the pump: the same
       // nozzle-locked path as the PIN scan (services/queue/nozzleService.js). A busy
       // nozzle leaves the car waiting; it starts by itself when released.
@@ -1168,7 +1191,9 @@ exports.collectBookingPayment = async (req, res) => {
       console.error("Socket emit error:", e);
     }
     res.json({
-      msg: `Payment of ₹${result.booking.amount} recorded (${method === "cash" ? "Cash" : "Online (UPI)"}).`,
+      // What was actually taken at the pump: the bill less any reward-points
+      // discount (services/payment/payMethod.js payableOf).
+      msg: `Payment of ₹${require("../services/payment/payMethod").payableOf(result.booking)} recorded (${method === "cash" ? "Cash" : "Online (UPI)"}).`,
       booking: result.booking,
       alreadyPaid: false,
     });
@@ -1355,6 +1380,79 @@ exports.getInventoryAlerts = async (req, res) => {
 };
 
 /**
+ * DELETE /api/vendor-panel/stations/:id/inventory/:fuel
+ *
+ * Clears everything this station holds for one fuel: the stock, the tank
+ * capacity, and every stock-history entry (deliveries, stock counts, sales,
+ * capacity changes). A vendor asks for this when the figures are wrong
+ * enough to be worth starting again.
+ *
+ * It cannot be undone, so:
+ *   - only the station's own vendor (or an admin) may do it
+ *   - it is refused while bookings still hold stock on that fuel, which would
+ *     leave reservations pointing at stock that no longer exists
+ *   - the answer says exactly what was removed
+ */
+exports.resetInventory = async (req, res) => {
+  try {
+    const station = await findOwnedStation(req.params.id, req);
+    if (!station) return res.status(404).json({ msg: "Station not found" });
+
+    const fuel = normaliseFuel(req.params.fuel);
+    if (!fuel) return res.status(400).json({ reason: "FUEL_INVALID", msg: "Fuel must be Petrol, Diesel or CNG." });
+    const label = FUEL_LABEL[fuel] || fuel;
+
+    // Bookings that still hold this fuel's stock (services/inventory/stockLedger.js).
+    const holding = await Booking.countDocuments({
+      station: station._id,
+      fuelType: label,
+      status: { $in: ["upcoming", "serving"] },
+    });
+    if (holding > 0) {
+      return res.status(409).json({
+        reason: "ACTIVE_BOOKINGS",
+        msg: `${holding} active ${label} booking${holding === 1 ? "" : "s"} still hold stock here. Complete or cancel them first.`,
+        activeBookings: holding,
+      });
+    }
+
+    const InventoryMovement = require("../models/InventoryMovement");
+    const removed = await InventoryMovement.deleteMany({ station: station._id, fuel });
+    const updated = await Station.findByIdAndUpdate(
+      station._id,
+      {
+        $set: {
+          [`inventory.${fuel}`]: 0,
+          [`inventoryCommitted.${fuel}`]: 0,
+          [`tankCapacity.${fuel}`]: null,
+        },
+      },
+      { new: true },
+    );
+
+    emitStationEvent(req, "station_updated", updated);
+    try {
+      realtime.stationChanged(realtime.EVENTS.INVENTORY_UPDATED, updated, {
+        inventory: updated.inventory,
+        tankCapacity: updated.tankCapacity,
+      });
+    } catch (e) {
+      console.error("[vendorPanel] inventory reset emit failed:", e.message);
+    }
+
+    res.json({
+      msg: `${label} inventory cleared: stock, tank capacity and ${removed.deletedCount} history entr${removed.deletedCount === 1 ? "y" : "ies"} removed.`,
+      fuel,
+      historyRemoved: removed.deletedCount,
+      station: updated,
+    });
+  } catch (err) {
+    console.error("[vendorPanel] inventory reset failed:", err);
+    res.status(500).json({ msg: "Server error clearing the inventory" });
+  }
+};
+
+/**
  * GET /api/vendor-panel/stations/:id/inventory/movements?fuel=petrol&limit=20
  *
  * The station's stock history, newest first: deliveries and stock counts
@@ -1418,7 +1516,21 @@ exports.getInventoryMovements = async (req, res) => {
 exports.getRevenue = async (req, res) => {
   try {
     const stations = await Station.find({ owner: req.user.id }).select("_id").lean();
-    const money = await revenueService.revenueSummary({ stationIds: stations.map((s) => s._id) });
+    const stationIds = stations.map((s) => s._id);
+
+    /**
+     * The same two aggregations the admin dashboard uses, scoped to this
+     * vendor's own stations.
+     *
+     * revenueWeeksThisMonth already accepted a stationIds filter and was only
+     * ever called without one, by the admin route. So the vendor console had
+     * four totals and no trend at all, and its Reports tab printed months as
+     * a table. The data existed; nobody had passed it the filter.
+     */
+    const [money, weeks] = await Promise.all([
+      revenueService.revenueSummary({ stationIds }),
+      revenueService.revenueWeeksThisMonth({ stationIds }),
+    ]);
 
     res.json({
       todaysRevenue: money.today.revenue,
@@ -1435,6 +1547,8 @@ exports.getRevenue = async (req, res) => {
       fuelSales: money.monthByFuel,
       awaitingCollection: money.awaitingCollection,
       totalBookings: money.month.transactions,
+      // Week by week through the current month, for the trend chart.
+      weeks,
       basis: money.basis,
       asOf: money.asOf,
     });
@@ -1559,28 +1673,119 @@ exports.getEmployees = async (req, res) => {
   }
 };
 
+/**
+ * Name, contact and pay for a staff record, checked once for both the create
+ * and the update path.
+ *
+ * `partial` is the update case: a field that was not sent is left alone,
+ * rather than being rejected as missing.
+ */
+/**
+ * A staff record whose phone number is already on this vendor's books.
+ *
+ * The unique (vendor, phone) index in models/Employee.js is what actually
+ * prevents it; this turns the database's E11000 into the answer the form needs
+ * rather than a 500.
+ */
+function duplicateEmployee(err) {
+  return err?.code === 11000 && (Boolean(err.keyPattern?.phone) || /uniq_employee_phone_per_vendor/.test(err.message || ""));
+}
+
+/**
+ * Refuse an employee request and take any uploaded photo with it.
+ *
+ * multer writes the file to disk before the handler runs, so every early
+ * return -- a bad field, a station that is not this vendor's, an employee that
+ * is not either -- leaves an image behind that nothing will ever reference.
+ * One per rejected form is a slow disk leak, and the refusals a stranger can
+ * reach (a guessed employee id) make it one anybody can drive.
+ *
+ * The catch blocks already clean up; this is the same courtesy for the paths
+ * that return deliberately.
+ */
+function refuseEmployee(req, res, status, payload) {
+  removeUploadedFile(storedPath(req.file, "profiles"));
+  return res.status(status).json(payload);
+}
+
+function validateEmployeeFields({ name, email, phone, salary, partial = false }) {
+  const fields = require("../services/validation/accountFields");
+  const { validateEmail } = require("../services/notification/emailValidation");
+  const values = {};
+
+  if (name !== undefined || !partial) {
+    const r = fields.validateName(name, { label: "Employee name" });
+    if (!r.ok) return r;
+    values.name = r.value;
+  }
+  if (phone !== undefined || !partial) {
+    const r = fields.validatePhone(phone);
+    if (!r.ok) return r;
+    values.phone = r.value;
+  }
+  // An employee's email is optional, but a wrong one is worse than none.
+  if (email !== undefined && String(email).trim() !== "") {
+    const r = validateEmail(email);
+    if (!r.ok) return { ok: false, field: "email", msg: r.msg };
+    values.email = r.email;
+  } else if (email !== undefined) {
+    values.email = "";
+  }
+  if (salary !== undefined) {
+    const n = Number(salary);
+    if (!Number.isFinite(n) || n < 0 || n > 10_000_000) {
+      return { ok: false, field: "salary", msg: "Salary must be a number between 0 and 1,00,00,000." };
+    }
+    values.salary = n;
+  } else if (!partial) {
+    values.salary = 0;
+  }
+
+  return { ok: true, values };
+}
+
 exports.addEmployee = async (req, res) => {
   try {
     const { name, email, phone, role, shift, salary, stationId } = req.body;
-    if (!name || !phone) {
-      return res
-        .status(400)
-        .json({ msg: "Name and phone are required" });
+
+    // Staff records are how a vendor reaches the person on shift, so the same
+    // rules as every other account field (services/validation/accountFields.js).
+    const staff = validateEmployeeFields({ name, email, phone, salary });
+    if (!staff.ok) return refuseEmployee(req, res, 400, { msg: staff.msg, field: staff.field });
+
+    // A staff member can only be posted to a station this vendor owns.
+    // Without this check the id was stored as sent, so a typo (or a guessed
+    // id) left an employee pointing at someone else's pump -- a reference
+    // that reads as real everywhere it is populated.
+    let station = null;
+    if (stationId) {
+      const owned = await Station.findOne({ _id: stationId, ...ownedStationFilter(req) }).select("_id").lean();
+      if (!owned) return refuseEmployee(req, res, 400, { msg: "That station is not one of yours.", field: "stationId" });
+      station = owned._id;
     }
 
     const employee = new Employee({
       vendor: req.user.id,
-      station: stationId,
-      name,
-      email,
-      phone,
+      station,
+      name: staff.values.name,
+      email: staff.values.email,
+      phone: staff.values.phone,
       role: role || "Attendant",
       shift: shift || "Full-Time",
-      salary: salary || 0,
+      salary: staff.values.salary,
+      // Optional, and the same shape as a customer's profile photo: a path
+      // under /uploads, never the image itself.
+      photo: storedPath(req.file, "profiles"),
     });
     await employee.save();
     res.status(201).json(employee);
   } catch (err) {
+    // The file was written before the record failed to save; leaving it would
+    // orphan an upload on disk for every rejected form.
+    removeUploadedFile(storedPath(req.file, "profiles"));
+    if (duplicateEmployee(err)) {
+      return res.status(409).json({ msg: "Someone on your staff already has this phone number.", field: "phone" });
+    }
     console.error(err);
     res.status(500).json({ msg: "Server error adding employee" });
   }
@@ -1593,15 +1798,49 @@ exports.updateEmployee = async (req, res) => {
       vendor: req.user.id,
     });
     if (!employee)
-      return res.status(404).json({ msg: "Employee not found" });
+      return refuseEmployee(req, res, 404, { msg: "Employee not found" });
 
-    const updates = req.body;
-    Object.keys(updates).forEach((key) => {
-      employee[key] = updates[key];
-    });
+    // An allow-list, not the request body.
+    //
+    // Copying every key the caller sent onto the document let a vendor set
+    // `vendor` to somebody else's id -- handing their own staff record to
+    // another account -- or write any other field the schema happens to
+    // have. Only these five are a vendor's to change, and they are checked
+    // the same way as when the record was created.
+    const { name, email, phone, role, shift, salary } = req.body;
+    const staff = validateEmployeeFields({ name, email, phone, salary, partial: true });
+    if (!staff.ok) return res.status(400).json({ msg: staff.msg, field: staff.field });
+
+    if (staff.values.name !== undefined) employee.name = staff.values.name;
+    if (staff.values.email !== undefined) employee.email = staff.values.email;
+    if (staff.values.phone !== undefined) employee.phone = staff.values.phone;
+    if (staff.values.salary !== undefined) employee.salary = staff.values.salary;
+    if (role !== undefined) employee.role = role;
+    if (shift !== undefined) employee.shift = shift;
+
+    /**
+     * The photo: replaced by a new upload, or cleared with removePhoto.
+     *
+     * The old file is deleted only AFTER the new path is committed, the same
+     * order the customer's profile photo uses
+     * (controllers/customerController.js) — deleting first would lose the
+     * picture if the save then failed.
+     */
+    const uploaded = storedPath(req.file, "profiles");
+    const previous = employee.photo;
+    const clearing = String(req.body?.removePhoto ?? "").toLowerCase() === "true";
+    if (uploaded) employee.photo = uploaded;
+    else if (clearing) employee.photo = null;
+
     await employee.save();
+    if ((uploaded || clearing) && previous && previous !== employee.photo) removeUploadedFile(previous);
+
     res.json(employee);
   } catch (err) {
+    removeUploadedFile(storedPath(req.file, "profiles"));
+    if (duplicateEmployee(err)) {
+      return res.status(409).json({ msg: "Someone on your staff already has this phone number.", field: "phone" });
+    }
     console.error(err);
     res.status(500).json({ msg: "Server error updating employee" });
   }
@@ -1615,6 +1854,9 @@ exports.deleteEmployee = async (req, res) => {
     });
     if (!employee)
       return res.status(404).json({ msg: "Employee not found" });
+    // The record is gone, so its photo is nobody's: left behind it would be
+    // an orphaned image of a real person sitting on disk for ever.
+    removeUploadedFile(employee.photo);
     res.json({ msg: "Employee removed successfully" });
   } catch (err) {
     console.error(err);
@@ -1775,18 +2017,56 @@ exports.updateProfile = async (req, res) => {
         return res.status(400).json({ msg: fuelUpdate.error, field: "vendorFuelTypes" });
       }
     }
+    // The same field rules as registration, so a vendor cannot edit their own
+    // record into a state the sign-up form would have refused
+    // (services/validation/accountFields.js). Only the fields actually sent
+    // are checked: the profile form saves one section at a time.
+    const fields = require("../services/validation/accountFields");
+    const checks = [];
+    if (name !== undefined) checks.push(["name", fields.validateName(name, { label: "Your name" })]);
+    if (businessName !== undefined) {
+      checks.push(["businessName", fields.validateName(businessName, { field: "businessName", label: "Business name" })]);
+    }
+    if (phone !== undefined) checks.push(["phone", fields.validatePhone(phone)]);
+    if (gstNumber !== undefined) checks.push(["gstNumber", fields.validateGst(gstNumber)]);
+    if (vendorAddress !== undefined) checks.push(["vendorAddress", fields.validateAddress(vendorAddress)]);
+    if (vendorDescription !== undefined) {
+      checks.push(["vendorDescription", fields.validateDescription(vendorDescription)]);
+    }
+    const checked = fields.all(checks);
+    if (!checked.ok) {
+      removeUploadedFile(uploaded);
+      return res.status(400).json({ msg: checked.msg, field: checked.field });
+    }
+
+    // Another vendor's number would send this vendor's support calls there.
+    if (checked.values.phone) {
+      const clash = await User.findOne({
+        phone: checked.values.phone,
+        role: "vendor",
+        _id: { $ne: req.user.id },
+      })
+        .select("_id")
+        .lean();
+      if (clash) {
+        removeUploadedFile(uploaded);
+        return res.status(400).json({ msg: "Another vendor already uses that phone number.", field: "phone" });
+      }
+    }
+
     const user = await User.findById(req.user.id);
     if (!user) {
       removeUploadedFile(uploaded);
       return res.status(404).json({ msg: "User not found" });
     }
 
-    if (name) user.name = name;
-    if (phone) user.phone = phone;
-    if (businessName) user.businessName = businessName;
-    if (gstNumber) user.gstNumber = gstNumber;
-    if (vendorAddress) user.vendorAddress = vendorAddress;
-    if (vendorDescription) user.vendorDescription = vendorDescription;
+    const clean = checked.values;
+    if (clean.name !== undefined) user.name = clean.name;
+    if (clean.phone !== undefined) user.phone = clean.phone;
+    if (clean.businessName !== undefined) user.businessName = clean.businessName;
+    if (clean.gstNumber !== undefined) user.gstNumber = clean.gstNumber;
+    if (clean.vendorAddress !== undefined) user.vendorAddress = clean.vendorAddress;
+    if (clean.vendorDescription !== undefined) user.vendorDescription = clean.vendorDescription;
     if (fuelUpdate) user.vendorFuelTypes = fuelUpdate.fuels;
 
     // The vendor's photo shares the `profileImage` field with every other
@@ -1827,5 +2107,46 @@ exports.updateSignature = async (req, res) => {
     removeUploadedFile(uploaded);
     console.error(err);
     res.status(500).json({ msg: "Server error saving the signature" });
+  }
+};
+
+/**
+ * GET /api/vendor-panel/distributions
+ *
+ * The same three distributions the admin console shows
+ * (services/analytics/distributions.js), scoped to the stations this vendor
+ * owns — which is the whole reason that service takes a stationIds filter.
+ *
+ * A vendor's version of this question is more actionable than the admin's: a
+ * platform-wide median wait tells nobody which pump to add a nozzle to.
+ */
+exports.getDistributions = async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+  try {
+    const stations = await Station.find({ owner: req.user.id }).select("_id").lean();
+    const stationIds = stations.map((s) => s._id);
+
+    // No stations means no bookings; answering with empty blocks keeps the
+    // screen's shape rather than making it handle a special case.
+    if (stationIds.length === 0) {
+      return res.json({
+        success: true,
+        days,
+        waiting: { buckets: [], total: 0, median: null, p90: null, longest: null },
+        quantities: [],
+        demand: { cells: [], days: [], hours: [], total: 0, busiest: null },
+      });
+    }
+
+    const distributions = require("../services/analytics/distributions");
+    const [waiting, quantities, demand] = await Promise.all([
+      distributions.waitingTimes({ stationIds, days }),
+      distributions.fuelQuantities({ stationIds, days }),
+      distributions.demandByHour({ stationIds, days }),
+    ]);
+    res.json({ success: true, days, waiting, quantities, demand });
+  } catch (err) {
+    console.error("[vendorPanel] distributions failed:", err.message);
+    res.status(500).json({ success: false, msg: "Could not load the distributions." });
   }
 };

@@ -63,18 +63,22 @@ export default function NozzleModes({ station }: { station: VendorStation }) {
   };
 
   return (
-    <div className="vm-bg-ground rounded-lg border vm-border p-3 mb-4" data-testid="nozzle-modes">
+    <div className="vm-bg-ground rounded-lg border vm-border p-3 mb-3" data-testid="nozzle-modes">
       <p className="text-[10px] vm-text-muted uppercase font-bold mb-2">
         <i className="fas fa-gas-pump mr-1" aria-hidden /> Nozzle assignment
       </p>
-      <div className="space-y-3">
+      <div className="space-y-2">
         {fuels.map((fuel) => {
           const label = VENDOR_FUELS.find((f) => f.key === fuel)?.label ?? fuel;
           const v = value(fuel);
           return (
-            <div key={fuel} data-testid={`nozzle-${fuel}`}>
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-xs font-bold w-14">{label}</span>
+            <div
+              key={fuel}
+              data-testid={`nozzle-${fuel}`}
+              className="vm-nozzle-row"
+            >
+              <>
+                <span className="text-xs font-bold">{label}</span>
                 <label className="flex items-center gap-1 text-[11px] vm-text-muted">
                   Total
                   <input
@@ -108,6 +112,7 @@ export default function NozzleModes({ station }: { station: VendorStation }) {
                     className="w-14 vm-bg-surface border vm-border rounded-md px-2 py-1 text-xs vm-text"
                   />
                 </label>
+                <p className="text-[11px] vm-text-muted truncate">{nozzleSummary(dirty(fuel) ? v : saved(fuel))}</p>
                 {dirty(fuel) && (
                   <button
                     type="button"
@@ -118,8 +123,7 @@ export default function NozzleModes({ station }: { station: VendorStation }) {
                     {saving === fuel ? "Saving…" : "Save"}
                   </button>
                 )}
-              </div>
-              <p className="text-[11px] vm-text-muted mt-1 ml-[68px]">{nozzleSummary(dirty(fuel) ? v : saved(fuel))}</p>
+              </>
             </div>
           );
         })}

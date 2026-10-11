@@ -22,11 +22,27 @@ export interface Booking {
   paymentStatus?: string;
   /** How a pay-at-the-pump payment was collected: cash, or UPI scanned at the pump. */
   collectionMethod?: "cash" | "upi" | null;
+  /** When the customer tapped "Check In at Petrol Pump" at the station. */
+  stationCheckInAt?: string | null;
+  /**
+   * Vehicles ahead, position, wait and estimated start, computed by the
+   * server for an active booking (backend services/queue/queueInfo.js); null otherwise.
+   */
+  queueInfo?: {
+    vehicleCountAhead: number;
+    queuePosition: number;
+    expectedWaitingSeconds: number;
+    expectedWaitingTime: string;
+    estimatedStartTime: string | null;
+  } | null;
   payMethod?: string;
   vehiclePlate?: string;
   /** Snapshot of the vehicle at booking time. Null on older bookings. */
   vehicleType?: string | null;
   vehicleName?: string | null;
+  /** Set when the customer booked the slot for another person. */
+  bookedForName?: string | null;
+  bookedForPhone?: string | null;
   verificationCode?: string;
   bookingStartTime?: string;
   bookingEndTime?: string;
@@ -92,5 +108,28 @@ export interface BookingDraft {
   date: string | null;
   timeSlot: string | null;
   quantity: number;
+  /**
+   * How the customer is saying "how much".
+   *
+   * "quantity" is the original flow: they choose litres/kg. "amount" is
+   * "₹1000 of petrol" -- they type rupees and the SERVER divides by the
+   * station's published price (backend services/booking/fuelAmount.js). The
+   * litres shown on screen in that mode are a preview of that division, and
+   * the booking uses the server's figure, not this one.
+   */
+  bookBy: "quantity" | "amount";
+  /** The rupees typed, when bookBy is "amount". */
+  fuelAmount: number;
   payMethod: string | null;
+  /** Set when the slot is booked for someone else; null = for the customer. */
+  bookedForName: string | null;
+  bookedForPhone: string | null;
+  /**
+   * Reward points the customer chose to spend on this booking.
+   *
+   * A request, not a decision: the SERVER checks the balance and the cap and
+   * works out the discount (backend services/rewards/rewardService.js), so the
+   * figures on screen are a preview of its answer -- never the authority.
+   */
+  redeemPoints: number;
 }

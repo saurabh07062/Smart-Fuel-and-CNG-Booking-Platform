@@ -153,7 +153,9 @@ export type MeResult =
  */
 export async function getMe(): Promise<MeResult> {
   try {
-    const { data } = await apiClient.get<{ user: User }>("/auth/me");
+    // Startup call: a short timeout so a missing server delays the first
+    // screen by seconds, not by the default twenty (hooks/useAuthBoot.ts).
+    const { data } = await apiClient.get<{ user: User }>("/auth/me", { timeout: 6000 });
     return data.user ? { status: "ok", user: data.user } : { status: "unauthorized" };
   } catch (err) {
     const code = (err as { response?: { status?: number } })?.response?.status;
@@ -182,4 +184,27 @@ export async function logoutEverywhere(): Promise<{ ok: boolean; msg?: string }>
   } catch (err) {
     return { ok: false, msg: toApiError(err).msg };
   }
+}
+
+/**
+ * POST /api/auth/profile/image (multipart field "profileImage").
+ *
+ * The signed-in account's OWN photo, whatever role it has. The customer app
+ * has its own copy of this against /customer/profile/image (customerApi.ts);
+ * this one is the role-neutral route, which is what the admin and vendor
+ * consoles use -- the server writes the account in the session and no other
+ * (backend routes/authRoutes.js).
+ */
+export async function uploadMyProfileImage(file: File): Promise<string | null> {
+  const body = new FormData();
+  body.append("profileImage", file);
+  const { data } = await apiClient.post<{ profileImage?: string | null }>("/auth/profile/image", body, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data.profileImage ?? null;
+}
+
+/** DELETE /api/auth/profile/image -- back to the initials avatar. */
+export async function removeMyProfileImage(): Promise<void> {
+  await apiClient.delete("/auth/profile/image");
 }

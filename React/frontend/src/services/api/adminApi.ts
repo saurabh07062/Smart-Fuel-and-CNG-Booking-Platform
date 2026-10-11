@@ -30,6 +30,11 @@ export interface AdminOrder {
   payMethod?: string;
   status: string;
   createdAt?: string;
+  /**
+   * Set when this order is one of several the customer booked together
+   * (backend models/FleetBooking.js); null for an ordinary booking.
+   */
+  fleet?: { fleetId: string; reference: string | null; position: number | null; of: number | null } | null;
 }
 
 export interface AdminOrdersResponse {
@@ -219,6 +224,12 @@ export interface SuperAdminDashboard {
     basis?: string;
     asOf?: string;
     monthly: Array<{ month: string; revenue: number; bookings: number; complete?: boolean }>;
+    /**
+     * The current month in calendar weeks ("1-7 Sep"), server-computed on the
+     * same revenue rule. Absent on an older backend, so callers fall back to
+     * the monthly series.
+     */
+    weeksThisMonth?: Array<{ label: string; from: string; to: string; revenue: number; transactions: number }>;
     forecastNextMonth: HistoryForecast;
     history?: SalesEvidence;
   };
@@ -280,7 +291,19 @@ export interface VerifyBookingResponse {
   nozzleFreeAt?: string | null;
 }
 
-export async function verifyBooking(input: { bookingId?: string; verificationCode?: string }) {
+/**
+ * POST /api/bookings/verify -- start a customer's fill from their code.
+ *
+ * `override: true` is the admin's support path: the server refuses a code
+ * from a customer who has not checked in at the pump, and an admin may go
+ * ahead anyway when the customer's own app cannot do it (no signal, dead
+ * battery). A vendor cannot override this.
+ */
+export async function verifyBooking(input: {
+  bookingId?: string;
+  verificationCode?: string;
+  override?: boolean;
+}) {
   const { data } = await apiClient.post<VerifyBookingResponse>(
     "/bookings/verify",
     input,
@@ -425,5 +448,176 @@ export async function reactivateVendor(id: string) {
 
 export async function deleteVendor(id: string) {
   const { data } = await apiClient.delete<{ msg?: string }>(`/vendors/${id}`);
+  return data;
+}
+
+/** One row of GET /api/v1/admin/customers. */
+export interface AdminCustomer {
+  _id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  isVerified: boolean;
+  vehicles: number;
+  joinedAt: string;
+  bookings: number;
+  completed: number;
+  cancelled: number;
+  lastBookingAt: string | null;
+  spent: number;
+}
+
+/** Registered customers with their own booking counts and spend (admin only). */
+export async function fetchAdminCustomers(search = ""): Promise<{ total: number; returned: number; customers: AdminCustomer[] }> {
+  const { data } = await apiClient.get("/v1/admin/customers", { params: search.trim() ? { search: search.trim() } : {} });
+  return data;
+}
+
+/** One entry of GET /api/v1/admin/activity. */
+export interface AdminActivityEntry {
+  kind: "booking" | "payment" | "vendor" | "station";
+  at: string;
+  title: string;
+  detail: string;
+  status: string;
+  amount: number | null;
+}
+
+/** The newest bookings, payments, vendor registrations and station changes. */
+export async function fetchAdminActivity(limit = 8): Promise<AdminActivityEntry[]> {
+  const { data } = await apiClient.get<{ entries: AdminActivityEntry[] }>("/v1/admin/activity", { params: { limit } });
+  return data.entries ?? [];
+}
+
+/**
+ * One station, as the admin console shows it: performance, fuels, queue,
+ * vendor and recent activity (GET /api/v1/admin/stations/:id/overview).
+ *
+ * A metric the backend cannot measure comes back null rather than zero, so
+ * the page can say "not recorded" instead of inventing a figure.
+ */
+export interface StationOverview {
+  station: {
+    id: string;
+    name: string;
+    address: string;
+    city: string | null;
+    status: string;
+    openingHours: string | null;
+    fuelTypes: string[];
+    coordinates: { lat: number; lng: number } | null;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+  vendor: {
+    id: string;
+    name?: string;
+    businessName: string | null;
+    email?: string;
+    phone: string | null;
+    vendorCode: string | null;
+    vendorStatus: string | null;
+    activated: boolean | null;
+    registeredAt?: string;
+  } | null;
+  bookings: {
+    byStatus: Record<string, number>;
+    total: number;
+    today: number;
+    thisMonth: number;
+  };
+  revenue: {
+    today: { revenue: number; bookings: number };
+    month: { revenue: number; bookings: number };
+    allTime: { revenue: number; bookings: number };
+    basis: string;
+  };
+  monthlySales: Array<{ month: string; revenue: number; bookings: number }>;
+  fuels: Array<{
+    fuel: string;
+    price: number | null;
+    stock: number | null;
+    capacity: number | null;
+    unit: string;
+    soldThisMonth: number;
+    revenueThisMonth: number;
+    bookingsThisMonth: number;
+  }>;
+  queue: {
+    waiting: number;
+    waitMinutes: number;
+    queueStatus: string;
+    lineClearsAt: number | null;
+    byFuel: Record<string, { queueLength: number; waitMinutes: number; queueStatus: string }>;
+    serving: number;
+  } | null;
+  recentActivity: Array<{
+    bookingId: string;
+    orderId: string | null;
+    status: string;
+    fuelType?: string;
+    quantity?: number;
+    amount?: number;
+    paymentStatus?: string;
+    customer: string | null;
+    at: string;
+  }>;
+}
+
+export async function fetchStationOverview(stationId: string): Promise<StationOverview> {
+  const { data } = await apiClient.get<StationOverview>(`/v1/admin/stations/${stationId}/overview`);
+  return data;
+}
+
+/* ───────────────────────── distributions ─────────────────────────
+   The shapes the totals hide. Every figure is a count of real booking rows
+   (backend services/analytics/distributions.js); nothing here is smoothed or
+   estimated, and each block carries its own sample size so a chart can refuse
+   to draw a distribution built from a handful of bookings.
+   ───────────────────────────────────────────────────────────────── */
+
+export interface HistogramBucket {
+  label: string;
+  from: number;
+  to: number | null;
+  count: number;
+}
+
+export interface WaitingTimes {
+  buckets: HistogramBucket[];
+  /** How many bookings this is measured from. */
+  total: number;
+  median: number | null;
+  p90: number | null;
+  longest: number | null;
+}
+
+export interface QuantityDistribution {
+  fuel: string;
+  unit: string;
+  total: number;
+  average: number;
+  buckets: HistogramBucket[];
+}
+
+export interface DemandByHour {
+  cells: Array<{ day: string; dayIndex: number; hour: number; count: number }>;
+  days: string[];
+  hours: number[];
+  total: number;
+  busiest: { day: string; hour: number; count: number } | null;
+}
+
+export interface Distributions {
+  success: boolean;
+  days: number;
+  waiting: WaitingTimes;
+  quantities: QuantityDistribution[];
+  demand: DemandByHour;
+}
+
+/** GET /api/v1/admin/distributions — every station, the last `days` days. */
+export async function fetchDistributions(days = 30): Promise<Distributions> {
+  const { data } = await apiClient.get<Distributions>("/v1/admin/distributions", { params: { days } });
   return data;
 }

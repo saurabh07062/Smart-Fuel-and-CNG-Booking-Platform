@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { UiStation, Vehicle } from "@/types";
 import VehicleArt from "@/components/vehicle/VehicleArt";
 import { useBookingDraftStore } from "@/store/bookingDraftStore";
@@ -5,6 +6,7 @@ import { SERVICE_FEE } from "@/constants/booking";
 import { formatCurrency } from "@/utils/format";
 import { resolveDraftVehicle } from "@/utils/vehicle";
 import FuelQueuePreview from "./FuelQueuePreview";
+import RewardRedeemCard from "./RewardRedeemCard";
 
 interface Props {
   station: UiStation;
@@ -36,10 +38,17 @@ function formatDay(date: string | null): string | null {
 export default function ConfirmPayStep({ station: s, vehicles, unitPrice, waitlist = false }: Props) {
   const draft = useBookingDraftStore((st) => st.draft);
   const setStep = useBookingDraftStore((st) => st.setStep);
+  const setRedeemPoints = useBookingDraftStore((st) => st.setRedeemPoints);
 
   const vehicle = resolveDraftVehicle(draft, vehicles);
   const fuelCost = unitPrice === null ? null : draft.quantity * unitPrice;
   const total = fuelCost === null ? null : fuelCost + SERVICE_FEE;
+  // The points discount is the SERVER's figure, handed up by the redeem card
+  // at the rate the quote reported. Kept here so the summary and the payment
+  // line below quote one number, not two calculations of it.
+  const [discount, setDiscount] = useState(0);
+  const applied = draft.redeemPoints > 0 ? discount : 0;
+  const payable = total === null ? null : Math.round((total - applied) * 100) / 100;
 
   const fact = (label: string, value: string | null) => (
     <div className="cx-fact" key={label}>
@@ -91,7 +100,30 @@ export default function ConfirmPayStep({ station: s, vehicles, unitPrice, waitli
           <span className="cx-total-label">Total</span>
           <span className="cx-total-value">{total === null ? "—" : formatCurrency(total)}</span>
         </div>
+        {applied > 0 && (
+          <>
+            <div className="cx-total is-discount" data-testid="confirm-reward-discount">
+              <span className="cx-total-label">Reward points ({draft.redeemPoints.toLocaleString("en-IN")})</span>
+              <span className="cx-total-value">− {formatCurrency(applied)}</span>
+            </div>
+            <div className="cx-total" data-testid="confirm-payable">
+              <span className="cx-total-label">To pay at the pump</span>
+              <span className="cx-total-value">{payable === null ? "—" : formatCurrency(payable)}</span>
+            </div>
+          </>
+        )}
       </section>
+
+      {!waitlist && (
+        <RewardRedeemCard
+          amount={total}
+          points={draft.redeemPoints}
+          onChange={(points, rupees) => {
+            setRedeemPoints(points);
+            setDiscount(rupees);
+          }}
+        />
+      )}
 
       {waitlist ? (
         <div
@@ -127,7 +159,7 @@ export default function ConfirmPayStep({ station: s, vehicles, unitPrice, waitli
             <span className="flex-1 min-w-0">
               <span className="cx-option-name block">Pay at the petrol pump</span>
               <span className="cx-option-sub block">
-                Nothing is charged now. Pay {total === null ? "the total" : formatCurrency(total)} to the attendant by
+                Nothing is charged now. Pay {payable === null ? "the total" : formatCurrency(payable)} to the attendant by
                 cash or UPI when you arrive and show your PIN.
               </span>
             </span>

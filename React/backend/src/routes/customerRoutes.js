@@ -9,6 +9,11 @@ const { uploadImage } = require('../middleware/upload');
 router.get('/profile', auth, requireRole('customer'), customerController.profile);
 router.get('/bookings', auth, requireRole('customer'), customerController.bookings);
 router.get('/notifications', auth, requireRole('customer'), customerController.notifications);
+// Reading them is a fact about the person, so it is stored with them rather
+// than in the tab. Without these the panel came back unread on the next
+// reconnect, showing the same messages again (customerController.js).
+router.post('/notifications/read', auth, requireRole('customer'), customerController.markNotificationsRead);
+router.post('/notifications/:id/read', auth, requireRole('customer'), customerController.markNotificationsRead);
 router.get('/dashboard', auth, requireRole('customer'), customerController.dashboard);
 
 // Profile photo. Multer field: "profileImage".

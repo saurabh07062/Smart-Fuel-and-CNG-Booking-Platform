@@ -177,6 +177,12 @@ export default function Register() {
               Sign in
             </Link>
           </p>
+          <p className="text-center mt-3">
+            By creating an account you agree to how we handle your data —{" "}
+            <Link to="/privacy" className="pp-link">
+              Privacy Policy
+            </Link>
+          </p>
         </form>
       </div>
     </div>

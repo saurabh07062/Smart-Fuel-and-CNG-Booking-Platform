@@ -24,7 +24,20 @@ export default function VendorDetail({
     ["GST Number", vendor.gstNumber],
     ["Joined", formatDate(vendor.createdAt)],
     ["Address", vendor.vendorAddress],
+    // The two figures the list card shows were missing from the page the
+    // card opens, which is the page an admin decides on.
+    ["Stations", String(vendor.stationCount ?? (vendor.stations ?? []).length)],
+    ["Revenue (all time)", formatINR(vendor.totalRevenue || 0)],
   ];
+
+  // Approved but the secret code has not been redeemed: the vendor cannot
+  // sign in yet, and that is worth saying where someone is looking at them.
+  if (vendor.vendorStatus === "active") {
+    facts.push([
+      "Panel access",
+      vendor.activated === false ? "Secret code not redeemed yet" : "Active — signed in with their code",
+    ]);
+  }
 
   if (open) {
     facts.push([

@@ -3,6 +3,7 @@ import * as api from "@/services/api/adminApi";
 import type { SecurityReport } from "@/services/api/adminApi";
 import { toApiError } from "@/services/api/apiClient";
 import { ConsoleLoading } from "@/components/console/ConsoleBits";
+import DataTable from "@/components/common/DataTable";
 
 const ACTION_STYLE: Record<string, string> = {
   blocked: "text-red-400 border-red-800 bg-red-900/30",
@@ -103,28 +104,17 @@ export default function AdminSecurityTab() {
               </>
             )}
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="vm-text-muted text-left text-xs uppercase">
-                  <th className="py-2 pr-3">Rule</th>
-                  <th className="py-2 pr-3">Trips at</th>
-                  <th className="py-2 pr-3">Window</th>
-                  <th className="py-2">Points</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.rules.list.map((r) => (
-                  <tr key={r.rule} className="border-t vm-border">
-                    <td className="py-2 pr-3 font-bold">{r.rule}</td>
-                    <td className="py-2 pr-3">more than {r.limit}</td>
-                    <td className="py-2 pr-3">{windowText(r.windowMinutes)}</td>
-                    <td className="py-2">{r.points}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            label="Risk rules"
+            rows={report.rules.list}
+            rowKey={(r) => r.rule}
+            columns={[
+              { key: "rule", header: "Rule", cell: (r) => <span className="font-bold">{r.rule}</span> },
+              { key: "limit", header: "Trips at", cell: (r) => `more than ${r.limit}` },
+              { key: "window", header: "Window", hideOnPhone: true, cell: (r) => windowText(r.windowMinutes) },
+              { key: "points", header: "Points", align: "right", cell: (r) => r.points },
+            ]}
+          />
         </section>
 
         <section className="vm-panel" style={{ padding: 22, marginBottom: 0 }}>
@@ -132,31 +122,31 @@ export default function AdminSecurityTab() {
           {report.topUsers7d.length === 0 ? (
             <p className="vm-text-muted text-sm">No account has triggered a rule in the last 7 days.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="vm-text-muted text-left text-xs uppercase">
-                    <th className="py-2 pr-3">Account</th>
-                    <th className="py-2 pr-3">Events</th>
-                    <th className="py-2 pr-3">Blocked</th>
-                    <th className="py-2">Last</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.topUsers7d.map((u) => (
-                    <tr key={u.userId} className="border-t vm-border">
-                      <td className="py-2 pr-3">
-                        <p className="font-bold">{u.name || "Unknown account"}</p>
-                        <p className="vm-text-muted text-xs">{u.email}</p>
-                      </td>
-                      <td className="py-2 pr-3">{u.events}</td>
-                      <td className="py-2 pr-3">{u.blocked}</td>
-                      <td className="py-2 text-xs vm-text-muted">{when(u.lastAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              label="Accounts with the most security events"
+              rows={report.topUsers7d}
+              rowKey={(u) => u.userId}
+              columns={[
+                {
+                  key: "account",
+                  header: "Account",
+                  cell: (u) => (
+                    <>
+                      <p className="font-bold">{u.name || "Unknown account"}</p>
+                      <p className="vm-text-muted text-xs">{u.email}</p>
+                    </>
+                  ),
+                },
+                { key: "events", header: "Events", align: "right", cell: (u) => u.events },
+                { key: "blocked", header: "Blocked", align: "right", cell: (u) => u.blocked },
+                {
+                  key: "last",
+                  header: "Last",
+                  hideOnPhone: true,
+                  cell: (u) => <span className="text-xs vm-text-muted">{when(u.lastAt)}</span>,
+                },
+              ]}
+            />
           )}
         </section>
       </div>
@@ -194,52 +184,68 @@ export default function AdminSecurityTab() {
             rule.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="vm-text-muted text-left text-xs uppercase">
-                  <th className="py-2 pr-3">When</th>
-                  <th className="py-2 pr-3">Action</th>
-                  <th className="py-2 pr-3">Why</th>
-                  <th className="py-2 pr-3">Score</th>
-                  <th className="py-2 pr-3">Account</th>
-                  <th className="py-2">Station</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.events.map((e) => (
-                  <tr key={e.id} className="border-t vm-border align-top">
-                    <td className="py-2 pr-3 whitespace-nowrap text-xs vm-text-muted">{when(e.createdAt)}</td>
-                    <td className="py-2 pr-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase ${ACTION_STYLE[e.action] ?? ""}`}
-                      >
-                        {e.action}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3">
-                      <p className="font-bold">{e.rule}</p>
-                      <p className="vm-text-muted text-xs">{e.reason}</p>
-                    </td>
-                    <td className="py-2 pr-3 whitespace-nowrap">
-                      {e.score} / {e.threshold}
-                    </td>
-                    <td className="py-2 pr-3">
-                      {e.user ? (
-                        <>
-                          <p>{e.user.name}</p>
-                          <p className="vm-text-muted text-xs">{e.user.email}</p>
-                        </>
-                      ) : (
-                        <span className="vm-text-muted">—</span>
-                      )}
-                    </td>
-                    <td className="py-2">{e.station?.name ?? <span className="vm-text-muted">—</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            label="Security events"
+            rows={report.events}
+            rowKey={(e) => e.id}
+            columns={[
+              {
+                key: "when",
+                header: "When",
+                cell: (e) => <span className="whitespace-nowrap text-xs vm-text-muted">{when(e.createdAt)}</span>,
+              },
+              {
+                key: "action",
+                header: "Action",
+                cell: (e) => (
+                  <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase ${ACTION_STYLE[e.action] ?? ""}`}>
+                    {e.action}
+                  </span>
+                ),
+              },
+              {
+                key: "why",
+                header: "Why",
+                cell: (e) => (
+                  <>
+                    <p className="font-bold">{e.rule}</p>
+                    <p className="vm-text-muted text-xs">{e.reason}</p>
+                  </>
+                ),
+              },
+              {
+                key: "score",
+                header: "Score",
+                align: "right",
+                hideOnPhone: true,
+                cell: (e) => (
+                  <span className="whitespace-nowrap">
+                    {e.score} / {e.threshold}
+                  </span>
+                ),
+              },
+              {
+                key: "account",
+                header: "Account",
+                hideOnPhone: true,
+                cell: (e) =>
+                  e.user ? (
+                    <>
+                      <p>{e.user.name}</p>
+                      <p className="vm-text-muted text-xs">{e.user.email}</p>
+                    </>
+                  ) : (
+                    <span className="vm-text-muted">—</span>
+                  ),
+              },
+              {
+                key: "station",
+                header: "Station",
+                hideOnPhone: true,
+                cell: (e) => e.station?.name ?? <span className="vm-text-muted">—</span>,
+              },
+            ]}
+          />
         )}
       </section>
     </div>

@@ -1,0 +1,1 @@
+function p(e,o){var t,n,l;const s=o.toLowerCase(),c=((t=e.fuelTypes)==null?void 0:t.some(u=>u.toLowerCase()===s))??!1,i=((n=e.fuelAvailability)==null?void 0:n[s])!==!1,r=(l=e.uiPrices)==null?void 0:l[o];return c&&i&&typeof r=="number"&&r>0}function f(e,o){return o.filter(s=>s.open&&p(s,e))}export{f as p,p as s};

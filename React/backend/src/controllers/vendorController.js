@@ -1,4 +1,15 @@
 const User = require("../models/User");
+
+/**
+ * Fields no admin screen shows, kept out of the response.
+ *
+ * -password was already excluded. These are the rest of the internals: the
+ * session counter, and the mechanics of the secret code (how many attempts,
+ * when it was last tried). An admin sees whether a vendor has redeemed their
+ * code -- that is `activated` -- and nothing about the machinery behind it.
+ */
+const ADMIN_VENDOR_HIDE =
+  "-password -tokenVersion -secretCode -secretCodeAttempts -secretCodeLastUsedAt -__v";
 const Station = require("../models/Station");
 const Booking = require("../models/Booking");
 const bcrypt = require("bcryptjs");
@@ -124,7 +135,7 @@ exports.getDashboardStats = async (req, res) => {
       User.find({ role: "vendor" })
         .sort({ createdAt: -1 })
         .limit(5)
-        .select("-password"),
+        .select(ADMIN_VENDOR_HIDE),
     ]);
 
     const totalRevenue = revenueAgg.length > 0 ? revenueAgg[0].total : 0;
@@ -250,7 +261,7 @@ exports.getAllVendors = async (req, res) => {
     }
 
     const vendors = await User.find(query)
-      .select("-password")
+      .select(ADMIN_VENDOR_HIDE)
       .sort({ createdAt: -1 });
 
     // Attach station count and revenue per vendor
@@ -325,7 +336,7 @@ exports.getVendorById = async (req, res) => {
     const vendor = await User.findOne({
       _id: req.params.id,
       role: "vendor",
-    }).select("-password");
+    }).select(ADMIN_VENDOR_HIDE);
 
     if (!vendor) {
       return res.status(404).json({ msg: "Vendor not found" });
@@ -712,11 +723,40 @@ exports.updateVendor = async (req, res) => {
       updates.email = emailCheck.email;
     }
 
+    // The same rules as registration, on whichever fields were sent. An admin
+    // fixing a typo must not be able to introduce a worse one, and
+    // findOneAndUpdate runs no schema validator that would catch it.
+    const fields = require("../services/validation/accountFields");
+    const checks = [];
+    if (updates.name !== undefined) checks.push(["name", fields.validateName(updates.name, { label: "Name" })]);
+    if (updates.businessName !== undefined) {
+      checks.push(["businessName", fields.validateName(updates.businessName, { field: "businessName", label: "Business name" })]);
+    }
+    if (updates.phone !== undefined) checks.push(["phone", fields.validatePhone(updates.phone)]);
+    if (updates.gstNumber !== undefined) checks.push(["gstNumber", fields.validateGst(updates.gstNumber)]);
+    if (updates.vendorAddress !== undefined) checks.push(["vendorAddress", fields.validateAddress(updates.vendorAddress)]);
+    if (updates.vendorDescription !== undefined) {
+      checks.push(["vendorDescription", fields.validateDescription(updates.vendorDescription)]);
+    }
+    const checked = fields.all(checks);
+    if (!checked.ok) return res.status(400).json({ msg: checked.msg, field: checked.field });
+    Object.assign(updates, checked.values);
+
+    // A phone number already registered to a different vendor.
+    if (updates.phone !== undefined) {
+      const clash = await User.findOne({ phone: updates.phone, role: "vendor", _id: { $ne: req.params.id } })
+        .select("_id")
+        .lean();
+      if (clash) {
+        return res.status(400).json({ msg: "Another vendor already uses that phone number.", field: "phone" });
+      }
+    }
+
     const vendor = await User.findOneAndUpdate(
       { _id: req.params.id, role: "vendor" },
       { $set: updates },
       { new: true, runValidators: true },
-    ).select("-password");
+    ).select(ADMIN_VENDOR_HIDE);
 
     if (!vendor) {
       return res.status(404).json({ msg: "Vendor not found" });
@@ -793,8 +833,22 @@ exports.registerVendor = async (req, res) => {
         ? { lat: pinLat, lng: pinLng }
         : undefined;
 
-    if (!name || !email || !password || !businessName) {
-      return res.status(400).json({ msg: "Please provide name, email, password and business name" });
+    // Every field, on the same rules the form uses
+    // (services/validation/accountFields.js). The form is a courtesy; this is
+    // the guarantee, so a request sent straight to the API cannot write a
+    // vendor with a 5-digit phone number or a one-character business name.
+    const fields = require("../services/validation/accountFields");
+    const checked = fields.all([
+      ["name", fields.validateName(name, { label: "Your name" })],
+      ["businessName", fields.validateName(businessName, { field: "businessName", label: "Business name" })],
+      ["password", fields.validatePassword(password, { confirm: body.confirmPassword })],
+      ["phone", fields.validatePhone(phone)],
+      ["gstNumber", fields.validateGst(gstNumber)],
+      ["vendorAddress", fields.validateAddress(vendorAddress)],
+      ["vendorDescription", fields.validateDescription(vendorDescription)],
+    ]);
+    if (!checked.ok) {
+      return res.status(400).json({ msg: checked.msg, field: checked.field });
     }
 
     // "Provided Products": which fuels the station sells. It used to be sent
@@ -821,22 +875,32 @@ exports.registerVendor = async (req, res) => {
 
     let user = await require("../utils/email").findUserByEmail(email);
     if (user) {
-      return res
-        .status(400)
-        .json({ msg: `User already exists with email: ${email}` });
+      return res.status(400).json({ msg: `User already exists with email: ${email}`, field: "email" });
+    }
+
+    // The number is how an admin reaches a vendor about their application;
+    // two vendors sharing one is a support call nobody can resolve.
+    const phoneTaken = await User.findOne({ phone: checked.values.phone, role: "vendor" })
+      .select("_id")
+      .lean();
+    if (phoneTaken) {
+      return res.status(400).json({
+        msg: "A vendor is already registered with that phone number.",
+        field: "phone",
+      });
     }
 
     user = new User({
-      name,
+      name: checked.values.name,
       email,
-      password,
+      password: checked.values.password,
       role: "vendor",
       vendorStatus: "pending",
-      businessName,
-      gstNumber,
-      phone,
-      vendorAddress,
-      vendorDescription,
+      businessName: checked.values.businessName,
+      gstNumber: checked.values.gstNumber,
+      phone: checked.values.phone,
+      vendorAddress: checked.values.vendorAddress,
+      vendorDescription: checked.values.vendorDescription,
       vendorFuelTypes: fuelChoice.fuels,
       ...(registrationLocation ? { registrationLocation } : {}),
       isVerified: true,

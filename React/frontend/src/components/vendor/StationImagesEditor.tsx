@@ -1,23 +1,39 @@
 import { useEffect, useRef, useState } from "react";
+import { soldFuels } from "@/utils/vendorFuels";
 import type { VendorStation } from "@/services/api/vendorApi";
-import { updateVendorPumpImages } from "@/services/api/vendorApi";
+import { updateVendorPumpImages, updateVendorStationPhoto } from "@/services/api/vendorApi";
 import { toApiError, uploadUrl } from "@/services/api/apiClient";
 import { pushToast } from "@/store/toastStore";
 
-import { IMAGE_MAX_BYTES, imageFileProblem } from "@/utils/imageUpload";
+import { IMAGE_MAX_BYTES, STATION_IMAGE_RULE_TEXT, stationImageProblem } from "@/utils/imageUpload";
 
 /** The same rules the server enforces (backend middleware/upload.js, "stations"). */
 export const PUMP_IMAGE_MAX_BYTES = IMAGE_MAX_BYTES;
 
 type PumpKey = "petrol" | "cng";
-const SLOTS: { key: PumpKey; label: string; icon: string }[] = [
+/**
+ * "station" is the station's own photo (Station.images[0]) -- the wide banner
+ * above the pump in the customer app. It lives here, with the pump photos,
+ * because it is the vendor's picture to take: the admin form used to hold a
+ * URL box for it, which meant an admin save could overwrite or erase a real
+ * photo with a pasted link.
+ */
+type SlotKey = PumpKey | "station";
+const SLOTS: { key: SlotKey; label: string; icon: string }[] = [
+  { key: "station", label: "Station Photo", icon: "fa-image" },
   { key: "petrol", label: "Petrol Pump Image", icon: "fa-gas-pump" },
   { key: "cng", label: "CNG Pump Image", icon: "fa-fire" },
 ];
+const blank = <T,>(v: T): Record<SlotKey, T> => ({ station: v, petrol: v, cng: v });
 
-/** Why a chosen file cannot be uploaded, or null. */
-export function pumpImageProblem(file: File): string | null {
-  return imageFileProblem(file, PUMP_IMAGE_MAX_BYTES);
+/**
+ * Why a chosen file cannot be uploaded, or null. Type, size AND the picture's
+ * own dimensions -- the server refuses a portrait or a thumbnail
+ * (services/upload/imageRules.js), so it is refused here first, before the
+ * vendor waits for an upload that was never going to be kept.
+ */
+export function pumpImageProblem(file: File): Promise<string | null> {
+  return stationImageProblem(file, PUMP_IMAGE_MAX_BYTES);
 }
 
 /**
@@ -36,9 +52,9 @@ export default function StationImagesEditor({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
-  const [files, setFiles] = useState<Record<PumpKey, File | null>>({ petrol: null, cng: null });
-  const [previews, setPreviews] = useState<Record<PumpKey, string | null>>({ petrol: null, cng: null });
-  const [errors, setErrors] = useState<Record<PumpKey, string | null>>({ petrol: null, cng: null });
+  const [files, setFiles] = useState<Record<SlotKey, File | null>>(() => blank<File | null>(null));
+  const [previews, setPreviews] = useState<Record<SlotKey, string | null>>(() => blank<string | null>(null));
+  const [errors, setErrors] = useState<Record<SlotKey, string | null>>(() => blank<string | null>(null));
   const [saving, setSaving] = useState(false);
 
   // Object URLs hold the file in memory until revoked: a replaced preview is
@@ -46,9 +62,9 @@ export default function StationImagesEditor({
   const createdUrls = useRef<string[]>([]);
   useEffect(() => () => createdUrls.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
-  const choose = (key: PumpKey, file: File | undefined) => {
+  const choose = async (key: SlotKey, file: File | undefined) => {
     if (!file) return;
-    const problem = pumpImageProblem(file);
+    const problem = await pumpImageProblem(file);
     setErrors((e) => ({ ...e, [key]: problem }));
     if (problem) return;
     const old = previews[key];
@@ -59,14 +75,27 @@ export default function StationImagesEditor({
     setPreviews((p) => ({ ...p, [key]: url }));
   };
 
-  const changed = Boolean(files.petrol || files.cng);
+  // A CNG-only station is not asked for a petrol pump photo, and the other
+  // way round: the slots follow what the station sells.
+  const sells = new Set<string>(soldFuels(station.fuelTypes));
+  const slots = SLOTS.filter((slot) => slot.key === "station" || sells.has(slot.key));
+  const changed = Boolean(files.station || files.petrol || files.cng);
 
   const save = async () => {
     if (!changed) return;
     setSaving(true);
     try {
-      const r = await updateVendorPumpImages(String(station._id), files);
-      pushToast(r.msg || "Pump images updated", "success");
+      // Two endpoints: the pump photos go to /pump-images, the station's own
+      // photo is a normal station edit with a file. Only what changed is sent.
+      if (files.petrol || files.cng) {
+        // Only the pump photos: the station's own photo goes to a different
+        // endpoint, and passing it here would send a key that route ignores.
+        await updateVendorPumpImages(String(station._id), { petrol: files.petrol, cng: files.cng });
+      }
+      if (files.station) {
+        await updateVendorStationPhoto(String(station._id), files.station);
+      }
+      pushToast("Photos updated", "success");
       await onSaved();
       onClose();
     } catch (err) {
@@ -77,24 +106,34 @@ export default function StationImagesEditor({
   };
 
   return (
-    <div className="vm-bg-surface rounded-2xl border vm-border p-6 mb-6" role="region" aria-label="Pump photos">
+    <div className="vm-bg-surface rounded-2xl border vm-border p-6 mb-6" role="region" aria-label="Station photos">
       <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
-        <i className="fas fa-camera vm-accent-text" aria-hidden /> Pump Photos
+        <i className="fas fa-camera vm-accent-text" aria-hidden /> Station &amp; Pump Photos
       </h3>
       <p className="vm-subtitle mb-4" style={{ fontSize: "12px" }}>
-        {station.name} · JPG, PNG or WEBP, up to 5MB each
+        {station.name} · {STATION_IMAGE_RULE_TEXT}
+      </p>
+      <p className="vm-text-muted mb-4" style={{ fontSize: "11.5px" }}>
+        <i className="fas fa-circle-info mr-1" aria-hidden />
+        A photo that does not meet this is not uploaded — the customer banner is wide, and a portrait or a small
+        photo is stretched across it.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {SLOTS.map(({ key, label, icon }) => {
-          const saved = uploadUrl(station.pumpImages?.[key] ?? null);
+        {slots.map(({ key, label, icon }) => {
+          const saved = uploadUrl(
+            key === "station" ? station.images?.[0] ?? null : station.pumpImages?.[key] ?? null,
+          );
           const shown = previews[key] ?? saved;
-          const inputId = `pump-image-${key}-${station._id}`;
+          const inputId = `station-photo-${key}-${station._id}`;
           return (
             <div key={key} className="vm-bg-ground rounded-xl border vm-border p-4">
               <p className="text-xs font-bold vm-text-muted mb-2">
                 <i className={`fas ${icon} mr-1`} aria-hidden /> {label}
               </p>
+              {key === "station" && (
+                <p className="text-xs vm-text-muted mb-2">Shown to customers above your pump in the app.</p>
+              )}
               {shown ? (
                 <img
                   src={shown}
@@ -122,7 +161,7 @@ export default function StationImagesEditor({
                 className="sr-only"
                 aria-label={label}
                 onChange={(e) => {
-                  choose(key, e.target.files?.[0]);
+                  void choose(key, e.target.files?.[0]);
                   e.target.value = ""; // choosing the same file again still fires
                 }}
               />

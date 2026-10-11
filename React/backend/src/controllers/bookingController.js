@@ -109,6 +109,39 @@ exports.createBooking = async (req, res) => {
       stationOwner: stationOwnerDoc && stationOwnerDoc.owner,
     });
 
+    /**
+     * The customer's own record that the booking was confirmed.
+     *
+     * Written HERE, after the booking has been saved and its slot, nozzle and
+     * stock reservation are all committed -- so a notification exists only for
+     * a booking the backend actually confirmed. A booking that was refused
+     * (no slot, no stock, a lost lock) throws long before this line and
+     * notifies nobody; a waitlisted one took the branch above and is told it
+     * is waiting, not that it is booked.
+     *
+     * Every value comes from the saved row: the station's stored name, the
+     * date and slot the server allocated, the fuel and the amount it priced.
+     * Nothing here is composed from what the client asked for.
+     */
+    await notifications.notify({
+      user: booking.user,
+      type: "booking_created",
+      title: "Booking confirmed",
+      body: [
+        booking.stationName,
+        `${booking.fuelType} ${booking.quantity} ${require("../config/fuels").fuelUnit(booking.fuelType) || "L"}`,
+        `${booking.bookingDate} ${booking.timeSlot}`,
+        booking.verificationCode ? `PIN ${booking.verificationCode}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      link: "booking",
+      booking: booking._id,
+      station: stationId,
+      // One per booking, however many times this path is reached.
+      dedupeKey: `booking:${booking._id}:confirmed`,
+    });
+
     // The vendor's notification bell, so a booking placed while their
     // dashboard was shut is still waiting for them.
     if (stationOwnerDoc && stationOwnerDoc.owner) {
@@ -194,7 +227,8 @@ exports.getUserBookings = async (req, res) => {
     const bookings = await Booking.find({ user: req.user.id })
       .populate("station", "name address images coordinates location")
       .sort({ createdAt: -1 });
-    res.json(await bookingService.attachWaitlistPositions(bookings));
+    // Vehicles ahead, position, wait and start (services/queue/queueInfo.js).
+    res.json(await require("../services/queue/queueInfo").withQueueInfo(await bookingService.attachWaitlistPositions(bookings)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -206,7 +240,8 @@ exports.getBookingById = async (req, res) => {
   try {
     const booking = await Booking.findOne({ _id: req.params.id, user: req.user.id }).populate("station", "name address coordinates location");
     if (!booking) return res.status(404).json({ msg: "Booking not found" });
-    res.json(booking);
+    const [withInfo] = await require("../services/queue/queueInfo").withQueueInfo([booking]);
+    res.json(withInfo);
   } catch (err) {
     console.error(err);
     res.status(500).send("Server Error");
@@ -302,7 +337,11 @@ exports.verifyBooking = async (req, res) => {
         bookingDate: today,
         status: { $in: ["upcoming", "serving"] },
         ...scope,
-      }).limit(2);
+      })
+        // More than two, because a fleet booking shares ONE code across its
+        // vehicles (services/booking/fleetBooking.js) and all of them are a
+        // legitimate match. The limit is only a bound on a hostile query.
+        .limit(20);
     }
 
     // No booking today with this code: it may be a valid booking for another
@@ -330,6 +369,14 @@ exports.verifyBooking = async (req, res) => {
     }
     if (matches.length === 0) return notFound();
     if (matches.length > 1) {
+      // A fleet booking's vehicles share one code on purpose, so several
+      // matches is the normal case for a group -- but only when they really
+      // are ONE group. Two unrelated bookings that happen to share four
+      // digits is the old ambiguity, and is still refused.
+      const groups = new Set(matches.map((b) => (b.fleetGroup ? String(b.fleetGroup) : null)));
+      if (groups.size === 1 && !groups.has(null)) {
+        return verifyFleetGroup({ req, res, matches, isAdmin, today });
+      }
       return res.status(409).json({
         success: false,
         msg: "More than one booking today uses this code. Scan the customer's QR code instead.",
@@ -361,12 +408,57 @@ exports.verifyBooking = async (req, res) => {
       return res.status(409).json({ success: false, msg: "This booking is already checked in and fueling." });
     }
 
+    // The PIN only works once the customer has arrived and tapped "Check In
+    // at Petrol Pump" in their app (services/booking/stationArrival.js).
+    //
+    // Without this the code is a number that works from anywhere: someone
+    // could read it out over the phone and have their fill started while they
+    // are still driving, which takes the nozzle away from whoever is actually
+    // standing at the pump and makes the arrival order -- the whole point of
+    // check-in -- meaningless.
+    //
+    // An admin can still override, because support exists for the case where
+    // the customer's own app cannot check in (no signal, dead battery).
+    const supportOverride = isAdmin && req.body?.override === true;
+    if (!booking.stationCheckInAt && !supportOverride) {
+      return res.status(409).json({
+        success: false,
+        reason: "NOT_CHECKED_IN",
+        msg: "Ask the customer to tap \"Check In at Petrol Pump\" in their app first. The code works once they have checked in here.",
+      });
+    }
+
     // Scanning the QR / entering the code at the pump is the CHECK-IN, through
     // the nozzle lock (services/queue/nozzleService.js): nozzle free -> fueling
     // starts now; nozzle busy -> the car waits at the pump and starts by
     // itself the moment the car ahead finishes. The booking completes when its
     // fuel's service time has run, and that completion is when stock is
     // deducted (services/booking/bookingCompletion.js).
+    // First come, first served: a customer who checked in at the station
+    // earlier ("Check In at Petrol Pump") and is still waiting would be
+    // jumped. Tell the attendant; they can still go ahead (override), e.g.
+    // when that customer has left.
+    if (req.body?.override !== true) {
+      const earlier = await require("../services/booking/stationArrival").earlierArrivals(booking);
+      if (earlier.length > 0) {
+        const first = earlier[0];
+        const at = new Date(first.stationCheckInAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
+        return res.status(409).json({
+          success: false,
+          reason: "EARLIER_ARRIVAL",
+          msg: `${first.user?.name || "Another customer"}${first.vehiclePlate ? ` (${first.vehiclePlate})` : ""} checked in at the pump first, at ${at}. Serve them first, or continue anyway.`,
+          earlier: earlier.map((e) => ({
+            bookingId: String(e._id),
+            orderId: e.orderId || null,
+            customer: e.user?.name || null,
+            vehiclePlate: e.vehiclePlate || null,
+            stationCheckInAt: e.stationCheckInAt,
+            timeSlot: e.timeSlot,
+          })),
+        });
+      }
+    }
+
     const now = new Date();
     // Check-in does not record the payment: a pay-at-station booking stays
     // owed until the attendant says how it was paid (cash or UPI at the pump)
@@ -434,6 +526,170 @@ exports.verifyBooking = async (req, res) => {
   } catch (err) {
     console.error("[Booking] verify failed:", err);
     res.status(500).json({ success: false, msg: "Server Error" });
+  }
+};
+
+/**
+ * One code, a whole fleet: the attendant typed the group's PIN.
+ *
+ * Reached from verifyBooking when a code matches several bookings that are all
+ * members of ONE group. Every rule a single check-in is held to still applies,
+ * per vehicle, inside services/booking/fleetCheckIn.js -- this function is the
+ * HTTP shape around it: confirm the group really is one group at this station,
+ * run the check-in, announce what changed, and answer with what happened to
+ * each vehicle.
+ *
+ * Nothing about slots, durations or queue order is decided here.
+ */
+async function verifyFleetGroup({ req, res, matches, isAdmin, today }) {
+  const fleetCheckIn = require("../services/booking/fleetCheckIn");
+  const groupId = matches[0].fleetGroup;
+
+  // Today only, as for a single booking.
+  const wrongDay = matches.find((b) => b.bookingDate !== today);
+  if (wrongDay) {
+    return res.status(409).json({
+      success: false,
+      msg:
+        wrongDay.bookingDate > today
+          ? `This fleet booking is for ${wrongDay.bookingDate}, not today.`
+          : "This fleet booking's date has passed.",
+    });
+  }
+
+  // Everything still live in the group, read fresh as documents.
+  const members = await fleetCheckIn.liveMembers(groupId);
+  if (members.length === 0) return res.status(409).json({ success: false, msg: "This fleet booking has nothing left to check in." });
+
+  // The attendant may only check in vehicles at their OWN station: the scope
+  // that found `matches` already enforced that, and every member of a group
+  // shares one station, but it is asserted rather than assumed.
+  const stationIds = new Set(members.map((m) => String(m.station)));
+  const allowed = new Set(matches.map((m) => String(m.station)));
+  if (stationIds.size !== 1 || !allowed.has([...stationIds][0])) {
+    return res.status(404).json({ success: false, msg: "No booking at your station(s) uses this code." });
+  }
+
+  // Nobody has arrived yet: the same refusal, and the same admin override, a
+  // single booking gets.
+  const supportOverride = isAdmin && req.body?.override === true;
+  if (!supportOverride && !members.some((m) => m.stationCheckInAt)) {
+    metrics.inc("verification_failed_count");
+    return res.status(409).json({
+      success: false,
+      reason: "NOT_CHECKED_IN",
+      msg: 'Ask the customer to tap "Check In at Petrol Pump" in their app first. The code works once they have checked in here.',
+    });
+  }
+
+  // Fairness between customers, judged once for the group: another customer
+  // who checked in earlier and is still waiting would be jumped by starting
+  // this fleet now. The attendant can still continue (override).
+  if (req.body?.override !== true) {
+    const first = members.find((m) => m.status === "upcoming" && m.stationCheckInAt) || members[0];
+    const earlier = await require("../services/booking/stationArrival").earlierArrivals(first);
+    const outsiders = earlier.filter((e) => String(e.fleetGroup || "") !== String(groupId));
+    if (outsiders.length > 0) {
+      const at = new Date(outsiders[0].stationCheckInAt).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Kolkata",
+      });
+      return res.status(409).json({
+        success: false,
+        reason: "EARLIER_ARRIVAL",
+        msg: `${outsiders[0].user?.name || "Another customer"}${outsiders[0].vehiclePlate ? ` (${outsiders[0].vehiclePlate})` : ""} checked in at the pump first, at ${at}. Serve them first, or continue anyway.`,
+        earlier: outsiders.map((e) => ({
+          bookingId: String(e._id),
+          orderId: e.orderId || null,
+          customer: e.user?.name || null,
+          vehiclePlate: e.vehiclePlate || null,
+          stationCheckInAt: e.stationCheckInAt,
+          timeSlot: e.timeSlot,
+        })),
+      });
+    }
+  }
+
+  const outcome = await fleetCheckIn.checkInGroup({ bookings: members, allowNotCheckedIn: supportOverride });
+
+  // Nothing moved: say why, using the reasons the members carried.
+  if (outcome.started.length === 0 && outcome.queued.length === 0) {
+    metrics.inc("verification_failed_count");
+    return res.status(409).json({
+      success: false,
+      reason: outcome.skipped[0]?.reason || "NOT_CHECKED_IN",
+      msg: fleetCheckIn.describeOutcome(outcome),
+      vehicles: outcome,
+    });
+  }
+
+  metrics.inc("verification_success_count");
+
+  // Each vehicle's own screens update, exactly as a single check-in does.
+  const touched = await Booking.find({ _id: { $in: [...outcome.started, ...outcome.queued].map((v) => v.bookingId) } })
+    .populate("user", "name")
+    .populate("station", "name owner");
+  for (const booking of touched) {
+    try {
+      realtime.bookingChanged(realtime.EVENTS.BOOKING_UPDATED, booking, { stationOwner: booking.station?.owner });
+    } catch (err) {
+      console.error("[Booking] fleet check-in emit failed:", err.message);
+    }
+  }
+  await refreshStationQueue(members[0].station).catch((err) =>
+    console.error("Failed to refresh station queue after fleet check-in:", err.message),
+  );
+
+  return res.json({
+    success: true,
+    fleet: true,
+    fleetGroup: String(groupId),
+    started: outcome.started.length > 0,
+    queued: outcome.queued.length > 0,
+    vehicles: outcome,
+    msg: fleetCheckIn.describeOutcome(outcome),
+  });
+}
+
+/**
+ * POST /api/bookings/:id/station-check-in -- "Check In at Petrol Pump".
+ * Body: { latitude, longitude } from the phone. Validated on the server
+ * (services/booking/stationArrival.js): own booking, today, within the
+ * check-in window, and within reach of the station.
+ */
+exports.stationCheckIn = async (req, res) => {
+  const { stationCheckIn, ArrivalError } = require("../services/booking/stationArrival");
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ msg: "Booking not found" });
+    const lat = Number(req.body?.latitude);
+    const lng = Number(req.body?.longitude);
+    const result = await stationCheckIn({ bookingId: req.params.id, userId: req.user.id, lat, lng });
+
+    if (!result.alreadyCheckedIn) {
+      // The vendor's list and the station's line update live.
+      try {
+        await result.booking.populate({ path: "station", select: "owner" });
+        realtime.bookingChanged(realtime.EVENTS.BOOKING_UPDATED, result.booking, { stationOwner: result.booking.station?.owner });
+      } catch (e) {
+        console.error("[Booking] station check-in emit failed:", e.message);
+      }
+      await refreshStationQueue(result.booking.station?._id || result.booking.station).catch(() => {});
+    }
+    const [withInfo] = await require("../services/queue/queueInfo").withQueueInfo([result.booking]);
+    res.json({
+      msg: result.alreadyCheckedIn ? "You are already checked in." : "Checked in. Show your PIN to the attendant when called.",
+      alreadyCheckedIn: result.alreadyCheckedIn,
+      distanceM: result.distanceM,
+      booking: withInfo,
+    });
+  } catch (err) {
+    if (err instanceof ArrivalError) {
+      return res.status(err.status).json({ reason: err.reason, msg: err.message, ...err.extra });
+    }
+    console.error("[Booking] station check-in failed:", err);
+    res.status(500).json({ msg: "Could not check you in. Please try again." });
   }
 };
 

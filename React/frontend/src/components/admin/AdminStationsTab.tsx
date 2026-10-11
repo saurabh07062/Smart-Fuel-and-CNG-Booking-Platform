@@ -5,12 +5,22 @@ import { useAdminStore } from "@/store/adminStore";
 import { pushToast } from "@/store/toastStore";
 import { toApiError, uploadUrl } from "@/services/api/apiClient";
 import { ConsoleLoading } from "@/components/console/ConsoleBits";
+import { soldFuels } from "@/utils/vendorFuels";
+import StationImagesEditor from "@/components/vendor/StationImagesEditor";
+import type { VendorStation } from "@/services/api/vendorApi";
 import StationForm, {
   STATION_DEFAULTS,
   toPayload,
   valuesFromStation,
   type StationFormValues,
 } from "./StationForm";
+
+/** Label and colour per fuel, matching the customer pages. */
+const FUEL_LOOK: Record<"petrol" | "diesel" | "cng", { label: string; cls: string }> = {
+  petrol: { label: "PETROL", cls: "text-orange-400" },
+  diesel: { label: "DIESEL", cls: "text-indigo-400" },
+  cng: { label: "CNG", cls: "text-emerald-400" },
+};
 
 /** Port of renderAdminStationManager() and its CRUD actions. */
 export default function AdminStationsTab() {
@@ -22,6 +32,17 @@ export default function AdminStationsTab() {
   const loadStations = useAdminStore((s) => s.loadStations);
 
   const [saving, setSaving] = useState(false);
+  /**
+   * Which station's photos are open.
+   *
+   * The admin form carries no photo field on purpose -- it only ever held a
+   * URL box, and saving it blank wiped the picture the vendor had uploaded.
+   * This is the real thing instead: the same uploader the vendor uses, writing
+   * a real file through the same endpoint (an admin is allowed on any station
+   * -- backend controllers/vendorPanelController.js findOwnedStation), with
+   * the same type, size and shape rules applied server-side.
+   */
+  const [photosId, setPhotosId] = useState<string | null>(null);
 
   const save = async (values: StationFormValues, id?: string) => {
     if (!values.name.trim() || !values.address.trim()) {
@@ -100,6 +121,8 @@ export default function AdminStationsTab() {
     }
   }
 
+  const photoStation = photosId && stations ? stations.find((st) => String(st._id) === photosId) : undefined;
+
   const header = (
     <div className="flex items-center justify-between mb-4">
       <div>
@@ -134,6 +157,19 @@ export default function AdminStationsTab() {
   return (
     <div className="space-y-6">
       {header}
+
+      {photoStation && (
+        <StationImagesEditor
+          key={`admin-photos-${photosId}`}
+          // The editor speaks the vendor station shape; an admin station row
+          // carries the same fields it reads (name, fuelTypes, images,
+          // pumpImages).
+          station={photoStation as unknown as VendorStation}
+          onClose={() => setPhotosId(null)}
+          onSaved={loadStations}
+        />
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {stations.length === 0 ? (
           <div className="col-span-full text-center py-16 vm-text-muted">
@@ -146,6 +182,7 @@ export default function AdminStationsTab() {
               key={String(s._id)}
               station={s}
               onEdit={() => setEditing(String(s._id))}
+              onPhotos={() => setPhotosId(String(s._id))}
               onToggle={() => void toggleStatus(String(s._id))}
               onDelete={() => void remove(String(s._id))}
             />
@@ -159,11 +196,13 @@ export default function AdminStationsTab() {
 function StationCard({
   station: s,
   onEdit,
+  onPhotos,
   onToggle,
   onDelete,
 }: {
   station: Station;
   onEdit: () => void;
+  onPhotos: () => void;
   onToggle: () => void;
   onDelete: () => void;
 }) {
@@ -171,7 +210,12 @@ function StationCard({
   const raw = s.images?.[0];
   // uploadUrl() resolves a stored /uploads path; a pasted absolute URL is
   // used as-is, which is what the Vanilla `|| s.images[0]` fallback did.
-  const photo = raw ? (uploadUrl(raw) ?? raw) : null;
+  // Without a station photo, the pump photo its vendor uploaded is shown --
+  // the same order the customer pages use (utils/station.ts).
+  const photo =
+    (raw ? (uploadUrl(raw) ?? raw) : null) ??
+    uploadUrl(s.pumpImages?.petrol ?? null) ??
+    uploadUrl(s.pumpImages?.cng ?? null);
   const prices = (s.prices ?? {}) as Record<string, number | undefined>;
 
   return (
@@ -208,19 +252,18 @@ function StationCard({
           <i className="fas fa-map-marker-alt mt-1" aria-hidden /> <span>{s.address}</span>
         </p>
 
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {(
-            [
-              ["PETROL", prices.petrol, "text-orange-400"],
-              ["DIESEL", prices.diesel, "text-indigo-400"],
-              ["CNG", prices.cng, "text-emerald-400"],
-            ] as Array<[string, number | undefined, string]>
-          ).map(([label, value, cls]) => (
-            <div key={label} className="vm-bg-ground rounded-lg p-2 text-center">
-              <p className="text-[10px] vm-text-muted font-bold">{label}</p>
-              <p className={`text-sm font-bold ${cls}`}>₹{value ?? "-"}</p>
-            </div>
-          ))}
+        {/* Only the fuels this station sells: a CNG-only pump shows CNG alone. */}
+        <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: `repeat(${Math.max(1, soldFuels(s.fuelTypes).length)}, minmax(0, 1fr))` }}>
+          {soldFuels(s.fuelTypes).map((fuel) => {
+            const meta = FUEL_LOOK[fuel];
+            const price = prices[fuel];
+            return (
+              <div key={fuel} className="vm-bg-ground rounded-lg p-2 text-center">
+                <p className="text-[10px] vm-text-muted font-bold">{meta.label}</p>
+                <p className={`text-sm font-bold ${meta.cls}`}>{price != null && price > 0 ? `₹${price}` : "Not set"}</p>
+              </div>
+            );
+          })}
         </div>
 
         <p className="text-[11px] vm-text-muted mb-4">
@@ -234,6 +277,15 @@ function StationCard({
             className="flex-1 vm-accent vm-accent-hover vm-text text-sm font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
             <i className="fas fa-edit" aria-hidden /> Edit
+          </button>
+          {/* A real photo upload, not a URL box. The wording follows what the
+              station actually has, so an admin can see which pumps still have
+              no picture without opening each one. */}
+          <button
+            onClick={onPhotos}
+            className="flex-1 vm-bg-ground vm-hover border vm-border vm-text text-sm font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+          >
+            <i className={`fas ${photo ? "fa-images" : "fa-camera"}`} aria-hidden /> {photo ? "Photos" : "Add Photo"}
           </button>
           <button onClick={onToggle} className="vm-btn vm-btn-ghost vm-btn-sm" title="Toggle Status" aria-label="Toggle status">
             <i className="fas fa-power-off" aria-hidden />

@@ -34,7 +34,8 @@ const WalkInSchema = new mongoose.Schema(
       default: "waiting",
     },
     // India business date the vehicle arrived ("YYYY-MM-DD", config/businessTime.js).
-    businessDate: { type: String, required: true },
+    // The shape is enforced: every daily figure groups walk-ins by this string.
+    businessDate: { type: String, required: true, trim: true, match: require("./shared/fieldValidators").DATE_KEY },
     arrivalTime: { type: Date, required: true },
     fuelingStartTime: { type: Date, default: null },
     completionTime: { type: Date, default: null },
@@ -54,6 +55,8 @@ const WalkInSchema = new mongoose.Schema(
 // The live line per station and fuel.
 WalkInSchema.index({ station: 1, fuelType: 1, status: 1, arrivalTime: 1 });
 WalkInSchema.index({ status: 1, businessDate: 1 });
+// A station's walk-ins on one day: the vendor's day sheet and its totals.
+WalkInSchema.index({ station: 1, businessDate: 1, fuelType: 1 });
 
 // One walk-in fuelling per nozzle at a time: a walk-in nozzle (lane 1..n), or
 // an app nozzle (lane 0, resource 1..n).

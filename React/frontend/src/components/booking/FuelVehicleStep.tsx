@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { UiStation, Vehicle } from "@/types";
 import VehicleArt from "@/components/vehicle/VehicleArt";
 import { useBookingDraftStore } from "@/store/bookingDraftStore";
 import { pushToast } from "@/store/toastStore";
+import { sellsFuel } from "@/utils/fuelPumps";
+import { canonicalFuel } from "@/utils/vendorFuels";
 import {
   BOOKING_VEHICLE_TYPES,
   detectVehicleType,
@@ -50,6 +52,30 @@ const VEHICLE_FUELS = ["Petrol", "Diesel", "CNG", "EV"];
 export default function FuelVehicleStep({ station, vehicles, onSaveVehicle, savingVehicle }: Props) {
   const draft = useBookingDraftStore((s) => s.draft);
   const patch = useBookingDraftStore((s) => s.patch);
+
+  /**
+   * Land on a fuel this station can actually serve. A link may carry a fuel
+   * the station does not sell (or has not priced), and leaving that selected
+   * only fails four steps later; if the station serves exactly one fuel there
+   * is nothing to choose anyway.
+   */
+  useEffect(() => {
+    const serviceable = station.fuelTypes.filter((f) => {
+      const key = canonicalFuel(f);
+      return key != null && sellsFuel(station, key);
+    });
+    if (serviceable.length === 0) return; // nothing bookable: the step says so
+    if (draft.fuelType && serviceable.includes(draft.fuelType)) return;
+    patch({ fuelType: serviceable[0] });
+    // station.id, not the object: a live queue patch must not re-pick the fuel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [station.id, draft.fuelType]);
+
+  /** Can this station actually serve this fuel today? (utils/fuelPumps.ts) */
+  const canBook = (f: string) => {
+    const key = canonicalFuel(f);
+    return key != null && sellsFuel(station, key);
+  };
 
   const current = useMemo(() => resolveDraftVehicle(draft, vehicles), [draft, vehicles]);
   const oneTime = current && !current.saved ? current : null;
@@ -114,13 +140,21 @@ export default function FuelVehicleStep({ station, vehicles, onSaveVehicle, savi
         >
           {station.fuelTypes.map((f) => {
             const selected = draft.fuelType === f;
+            // A fuel this station has not priced, or has marked out of
+            // stock, cannot be booked -- the server refuses it. Showing it as
+            // a live choice is what made a customer pick Petrol at a CNG
+            // pump and be told the price was not published at the last step.
+            const bookable = canBook(f);
             return (
               <button
                 key={f}
                 type="button"
                 className={`cx-option ${selected ? "is-selected" : ""}`}
-                onClick={() => patch({ fuelType: f })}
+                onClick={() => bookable && patch({ fuelType: f })}
                 aria-pressed={selected}
+                disabled={!bookable}
+                title={bookable ? undefined : `${f} is not available at this station`}
+                style={bookable ? undefined : { opacity: 0.45, cursor: "not-allowed" }}
               >
                 <span className="cx-option-check">
                   <i className="fas fa-check" aria-hidden />
@@ -130,9 +164,11 @@ export default function FuelVehicleStep({ station, vehicles, onSaveVehicle, savi
                 </span>
                 <span className="cx-option-name block">{f}</span>
                 <span className="cx-option-sub block">
-                  {station.uiPrices[f as keyof typeof station.uiPrices] != null
-                    ? `INR ${station.uiPrices[f as keyof typeof station.uiPrices]}/L`
-                    : "Price not published"}
+                  {bookable
+                    ? `₹${station.uiPrices[f as keyof typeof station.uiPrices]}${f.toLowerCase() === "cng" ? "/kg" : "/L"}`
+                    : station.fuelAvailability?.[f.toLowerCase() as "petrol" | "diesel" | "cng"] === false
+                      ? "Out of stock"
+                      : "Not sold here"}
                 </span>
               </button>
             );

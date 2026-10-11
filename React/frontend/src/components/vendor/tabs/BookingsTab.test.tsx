@@ -172,6 +172,53 @@ describe("Vendor bookings: real payment state and collection", () => {
     expect(screen.getByRole("button", { name: "Collect payment for #00000004" })).toBeTruthy();
   });
 
+  it("shows the same queue figures the customer sees on an upcoming booking", () => {
+    store.stationBookings = [
+      row({
+        _id: "b0000000000000000000007",
+        status: "upcoming",
+        queueInfo: { vehicleCountAhead: 2, queuePosition: 3, expectedWaitingSeconds: 80, expectedWaitingTime: "1 min 20 sec", estimatedStartTime: "11:01 AM" },
+      }),
+      row({ _id: "b0000000000000000000008", status: "completed", queueInfo: null }),
+    ];
+    render(<BookingsTab />);
+    const line = within(screen.getByTestId("booking-row-b0000000000000000000007")).getByTestId("queue-info").textContent ?? "";
+    expect(line).toContain("#3");
+    expect(line).toContain("2 vehicles ahead");
+    expect(line).toContain("wait 1 min 20 sec");
+    expect(line).toContain("~11:01 AM");
+    expect(within(screen.getByTestId("booking-row-b0000000000000000000008")).queryByTestId("queue-info")).toBeNull();
+  });
+
+  it("a customer who checked in at the pump earlier: asks before serving someone else", async () => {
+    const user = userEvent.setup();
+    store.stationBookings = [];
+    const held = { response: { data: { reason: "EARLIER_ARRIVAL", msg: "Asha (MH12AB1000) checked in at the pump first, at 10:05 AM." } } };
+    vi.mocked(api.checkInWithCode).mockRejectedValueOnce(held).mockResolvedValueOnce({ msg: "Checked in. Fueling has started.", started: true });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<BookingsTab />);
+    await user.type(screen.getByLabelText("Customer verification code"), "4321");
+    await user.click(screen.getByRole("button", { name: /Start Fueling/ }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(String(confirm.mock.calls[0][0])).toContain("checked in at the pump first");
+    // "Cancel": nothing else is sent.
+    expect(api.checkInWithCode).toHaveBeenCalledTimes(1);
+
+    // Again, and "OK": sent once more with override.
+    vi.mocked(api.checkInWithCode).mockReset();
+    vi.mocked(api.checkInWithCode).mockRejectedValueOnce(held).mockResolvedValueOnce({ msg: "Checked in. Fueling has started.", started: true });
+    confirm.mockReturnValue(true);
+    await user.type(screen.getByLabelText("Customer verification code"), "4321");
+    await user.click(screen.getByRole("button", { name: /Start Fueling/ }));
+    await waitFor(() => expect(api.checkInWithCode).toHaveBeenLastCalledWith("4321", { override: true }));
+  });
+
+  it("marks customers who checked in at the pump", () => {
+    store.stationBookings = [row({ _id: "b0000000000000000000011", status: "upcoming", stationCheckInAt: "2026-09-22T04:35:00Z" })];
+    render(<BookingsTab />);
+    expect(within(screen.getByTestId("booking-row-b0000000000000000000011")).getByTestId("arrived-tag").textContent).toMatch(/Arrived/);
+  });
+
   it("offers the invoice only on completed bookings", () => {
     store.stationBookings = [
       row({ _id: "b0000000000000000000001", status: "upcoming" }),

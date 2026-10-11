@@ -186,6 +186,22 @@
   transition: color 0.15s;
   flex-shrink: 0;
 }
+/* A count beside a rail item (support conversations waiting for the team).
+   Only rendered when it is non-zero -- ConsoleShell.tsx explains why. */
+.vm-nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--z-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
 .vm-nav-item:hover {
   background: var(--z-line-soft);
   color: var(--z-ink);
@@ -299,6 +315,95 @@
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid var(--z-line);
+  display: block;
+}
+
+/* The header avatar is also the photo control (ConsoleAvatar.tsx): the camera
+   badge says so without adding another button to the top bar. */
+.vm-avatar-wrap {
+  position: relative;
+}
+.vm-avatar-btn {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  line-height: 0;
+}
+.vm-avatar-btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.vm-avatar-btn:focus-visible {
+  outline: 2px solid var(--z-accent);
+  outline-offset: 3px;
+}
+.vm-avatar-edit {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--z-accent);
+  color: #fff;
+  font-size: 8.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--z-surface, #fff);
+  transition: transform 0.15s ease;
+}
+.vm-avatar-btn:hover .vm-avatar-edit {
+  transform: scale(1.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vm-avatar-edit {
+    transition: none;
+  }
+}
+
+.vm-avatar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  min-width: 176px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--z-surface, #fff);
+  border: 1px solid var(--z-line);
+  box-shadow: 0 12px 28px -10px rgba(15, 23, 42, 0.28);
+}
+.vm-avatar-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--z-ink);
+  font-family: var(--z-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.vm-avatar-menu button:hover {
+  background: var(--z-line-soft);
+}
+.vm-avatar-menu button.is-danger {
+  color: var(--z-accent);
+}
+.vm-avatar-menu button i {
+  width: 14px;
+  text-align: center;
+  font-size: 11.5px;
 }
 
 .vm-body {
@@ -1347,3 +1452,182 @@
 /* A card that lifts its border on hover, used by the station and stat cards
    in the vendor panel. */
 .vm .vm-hover-border:hover { border-color: var(--z-light); }
+
+/* ---------------------------------------------------- station card rows
+   Nozzle assignment and slot timings: one aligned line per fuel / per day on
+   a normal screen, wrapping to two lines on a phone. */
+.vm-nozzle-row {
+  display: grid;
+  grid-template-columns: 56px auto auto 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+}
+.vm-slot-row {
+  display: grid;
+  grid-template-columns: 34px 108px auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+}
+@media (max-width: 720px) {
+  .vm-nozzle-row {
+    grid-template-columns: 52px auto auto 1fr;
+  }
+  .vm-nozzle-row > :last-child {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+  .vm-slot-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+  .vm-slot-row > :nth-child(3) {
+    grid-column: 2 / -1;
+  }
+  .vm-slot-row > :nth-child(4) {
+    grid-column: 2 / 3;
+  }
+}
+
+/* ============================================================
+   ADMIN CONSOLE POLISH
+   The admin console is a dashboard, and a dashboard is read at a glance:
+   a figure, a state, a shape. These few rules give the panels the lift and
+   the rhythm the tables already had -- nothing here changes behaviour, and
+   every token still comes from the palette above.
+   ============================================================ */
+
+.vm {
+  /* The console's own accent, green like the app's, used for the things a
+     dashboard highlights. Red stays what it has always been: a problem. */
+  --z-accent: #1a8f4a;
+  --z-accent-soft: rgba(26, 143, 74, 0.12);
+}
+[data-theme="dark"] .vm {
+  --z-accent: #34c26b;
+  --z-accent-soft: rgba(52, 194, 107, 0.16);
+}
+
+/* Panel headings lead with the accent, not the error colour. */
+.vm .vm-panel-title i { color: var(--z-accent); }
+
+/* A KPI tile is a card you can press: give it the feedback of one. */
+.vm .vm-tile {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.vm .vm-tile::after {
+  /* A hairline of the tile's own tone along the top edge. */
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: currentColor;
+  opacity: 0.55;
+}
+.vm a.vm-tile:hover,
+.vm button.vm-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--z-shadow-lift);
+  border-color: var(--z-accent);
+}
+
+/* The state a figure is in, said in two words beside it. */
+.vm .vm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.vm .vm-pill.t-good { background: var(--z-green-tint); color: var(--z-green); border-color: color-mix(in srgb, var(--z-green) 28%, transparent); }
+.vm .vm-pill.t-warn { background: var(--z-amber-tint); color: var(--z-amber); border-color: color-mix(in srgb, var(--z-amber) 28%, transparent); }
+.vm .vm-pill.t-bad  { background: var(--z-red-tint);   color: var(--z-red);   border-color: var(--z-red-line); }
+.vm .vm-pill.t-info { background: var(--z-blue-tint);  color: var(--z-blue);  border-color: color-mix(in srgb, var(--z-blue) 28%, transparent); }
+.vm .vm-pill.t-idle { background: var(--z-slate-tint); color: var(--z-slate); border-color: color-mix(in srgb, var(--z-slate) 24%, transparent); }
+
+/* Small-caps labels above a figure: the dashboard's one typographic rule. */
+.vm .vm-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--z-light);
+}
+
+/* The one number a panel exists for. */
+.vm .vm-figure {
+  font-family: var(--z-sans);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--z-ink);
+  font-variant-numeric: tabular-nums;
+}
+.vm .vm-figure.is-accent { color: var(--z-accent); }
+
+/* ---- the console rail -------------------------------------------------
+   Both consoles (vendor and admin) are used all day, and the nav is the part
+   always on screen: it should say where you are without being read. The
+   active item gets the accent, a filled tint and a marker on its left edge --
+   three signals, so it survives a glance, a colour-blind eye and a dim
+   screen. One rule for both, because two consoles that look like two
+   different products is the inconsistency this section exists to end. */
+.vm .vm-nav-item.is-active {
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+}
+.vm .vm-nav-item.is-active i { color: var(--z-accent); }
+.vm .vm-nav-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--z-accent);
+}
+.vm .vm-nav-item { padding-left: 15px; }
+
+/* The one primary action per screen reads as the console's accent. */
+.vm .vm-btn-primary { background: var(--z-accent); }
+.vm .vm-btn-primary:hover { background: color-mix(in srgb, var(--z-accent) 84%, #000); }
+
+/* A dashboard's panels sit in a grid; the stock 20px bottom margin fights
+   grid gaps and leaves ragged rows. Inside a grid the gap is the spacing. */
+.vm .grid > .vm-panel,
+.vm .grid > * > .vm-panel { margin-bottom: 0; }
+
+/* The contact lines on a vendor card: one per line, ellipsised rather than
+   wrapped, so eight cards in a grid stay the same height. */
+.vm .vm-card-lines {
+  margin-top: 8px;
+  display: grid;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--z-grey);
+}
+.vm .vm-card-lines li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vm .vm-card-lines i {
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--z-light);
+  flex-shrink: 0;
+}

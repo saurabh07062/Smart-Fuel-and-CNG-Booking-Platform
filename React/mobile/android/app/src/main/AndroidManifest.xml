@@ -1,9 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      allowBackup="false": no automatic cloud backup of this app's data.
+
+      Android's auto-backup copies an app's files to the user's Google account
+      and restores them onto any device they sign in to. For this app that data
+      is the WebView's storage and cookie jar - the signed-in profile and the
+      session cookies themselves. Restoring a backup would hand someone a
+      working FuelMart session on a different phone, which is not something a
+      fuel booking needs and not something a person would expect.
+
+      dataExtractionRules says the same thing to Android 12 and later, which
+      ignores fullBackupContent.
+    -->
     <application
         android:usesCleartextTraffic="true"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

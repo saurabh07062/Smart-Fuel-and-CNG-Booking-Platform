@@ -1,25 +1,45 @@
 import type { ReactNode } from "react";
+import StatCard from "@/components/common/StatCard";
 
 /**
  * Small shared pieces of the vendor console: stat card, fuel bar, empty
  * state, and the section panel. All ported from vendorPanel.js's helpers.
  */
 
-const STAT_COLORS: Record<string, { bg: string; fg: string }> = {
-  blue: { bg: "bg-blue-500/20", fg: "vm-accent-text" },
-  emerald: { bg: "bg-emerald-500/20", fg: "text-emerald-400" },
-  yellow: { bg: "bg-yellow-500/20", fg: "text-yellow-400" },
-  orange: { bg: "bg-orange-500/20", fg: "text-orange-400" },
-  red: { bg: "bg-red-500/20", fg: "text-red-400" },
-  indigo: { bg: "bg-indigo-500/20", fg: "text-indigo-400" },
-  cyan: { bg: "bg-cyan-500/20", fg: "vm-accent-text" },
+/**
+ * The colour names the vendor tabs pass, translated into what a figure MEANS.
+ *
+ * The call sites say "emerald", "cyan", "indigo" — decorative names that tell
+ * a reader nothing and dark mode nothing. Rather than edit forty call sites,
+ * they are mapped here to the four semantic tones the shared card understands,
+ * so a vendor figure and an admin figure become the same object on screen
+ * (components/common/StatCard.tsx).
+ *
+ * Totals and money read as neutral; anything owed or waiting reads as a
+ * warning; anything confirmed reads as good.
+ */
+const TONE_FOR: Record<string, "primary" | "good" | "warn" | "bad"> = {
+  blue: "primary",
+  cyan: "primary",
+  indigo: "primary",
+  emerald: "good",
+  green: "good",
+  yellow: "warn",
+  orange: "warn",
+  amber: "warn",
+  red: "bad",
 };
 
 interface StatProps {
   label: string;
   value: ReactNode;
   icon: string;
-  color?: keyof typeof STAT_COLORS | string;
+  /**
+   * A legacy colour name from the call sites ("emerald", "cyan", …), mapped
+   * to a semantic tone by TONE_FOR. Plainly `string`: `keyof` would drag a
+   * symbol into the union and an unknown name falls back to "primary" anyway.
+   */
+  color?: string;
 }
 
 /**
@@ -32,22 +52,9 @@ interface StatProps {
  * unchanged.
  */
 export function VendorStatCard({ label, value, icon, color = "blue" }: StatProps) {
-  const c = STAT_COLORS[color] ?? STAT_COLORS.blue;
-  return (
-    <div className="vm-bg-surface p-5 rounded-2xl border vm-border vm-hover-border transition-colors">
-      <div className="flex justify-between items-start mb-3">
-        <div className={`w-9 h-9 rounded-lg ${c.bg} flex items-center justify-center`}>
-          <i className={`fas ${icon} ${c.fg} text-sm`} aria-hidden />
-        </div>
-      </div>
-      <p className="vm-stat-label" style={{ marginBottom: 2 }}>
-        {label}
-      </p>
-      <p className="vm-stat-value" style={{ fontSize: 22 }}>
-        {value}
-      </p>
-    </div>
-  );
+  // Still exported under its own name, because forty call sites use it. What
+  // changed is that it no longer draws anything itself.
+  return <StatCard label={label} value={value} icon={icon} tone={TONE_FOR[color] ?? "primary"} />;
 }
 
 const BAR_COLORS: Record<string, string> = {

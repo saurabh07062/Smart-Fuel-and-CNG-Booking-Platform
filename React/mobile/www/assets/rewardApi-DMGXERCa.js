@@ -1,0 +1,1 @@
+import{T as e}from"./index-3cnJ6k2C.js";async function n(a={}){const{data:t}=await e.get("/v1/rewards",{params:a});return t}async function s(a){const{data:t}=await e.get("/v1/rewards/quote",{params:{amount:a}});return t}export{s as a,n as f};

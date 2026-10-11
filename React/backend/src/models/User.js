@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
+const { phoneValidator, gstValidator } = require("./shared/fieldValidators");
 
 const UserSchema = new mongoose.Schema({
-  name: { type: String, required: true },
+  name: { type: String, required: true, trim: true, maxlength: 120 },
   // Validated, not just required. Before this, "gmail.comt" was accepted and
   // the vendor never received their approval email -- see
   // services/notification/emailValidation.js. Enforced on the schema as well as at the
@@ -11,16 +12,27 @@ const UserSchema = new mongoose.Schema({
     required: true,
     unique: true,
     trim: true,
+    // An address is an identity, not text: stored lowercase so the unique
+    // index means one account per address whatever case it was typed in.
+    // utils/email.js still looks older mixed-case records up case-insensitively,
+    // so nothing already stored stops signing in.
+    lowercase: true,
+    maxlength: 254,
     validate: {
       validator: (v) => require("../services/notification/emailValidation").isValidEmail(v),
       message: (p) => `"${p.value}" is not a valid email address`,
     },
   },
+  // The bcrypt hash, never a password. NOT select:false: every auth path in
+  // the app reads it through plain finders, and hiding it here would silently
+  // break login rather than protect anything -- what keeps it out of responses
+  // is the projection each controller sends (ADMIN_VENDOR_HIDE and friends).
   password: { type: String, required: true },
   role: {
     type: String,
     enum: ["customer", "vendor", "admin"],
     default: "customer",
+    index: true,
   },
   // Vendor-specific fields
   vendorStatus: {
@@ -28,11 +40,14 @@ const UserSchema = new mongoose.Schema({
     enum: ["pending", "under_review", "active", "suspended", "rejected"],
     default: "pending",
   },
-  businessName: { type: String },
-  gstNumber: { type: String },
-  phone: { type: String },
-  vendorAddress: { type: String },
-  vendorDescription: { type: String },
+  businessName: { type: String, trim: true, maxlength: 160 },
+  gstNumber: { type: String, trim: true, uppercase: true, validate: gstValidator("gstNumber") },
+  // Validated in the same words as the registration form
+  // (services/validation/accountFields.js): the schema is the last line, so a
+  // future entry point cannot store a 9-digit number by skipping the route.
+  phone: { type: String, trim: true, validate: phoneValidator("phone") },
+  vendorAddress: { type: String, trim: true, maxlength: 400 },
+  vendorDescription: { type: String, trim: true, maxlength: 1000 },
   // The fuels this vendor sells, chosen at registration (services/vendor/vendorFuels.js).
   // Unset for vendors registered before it was recorded: they keep every fuel.
   vendorFuelTypes: {
@@ -96,18 +111,53 @@ const UserSchema = new mongoose.Schema({
   // is what opens the vendor panel; reissuing a code clears it.
   activated: { type: Boolean, default: false },
   // Customer fields
-  wallet: { type: Number, default: 500 },
-  rewards: { type: Number, default: 100 },
+  // Money and points never go below zero: a negative balance is not a state
+  // this app has, it is a bug that has already been written down.
+  /**
+   * A money balance held for the customer. Zero until something puts money in
+   * it, which nothing does: payment is taken at the petrol pump
+   * (config/payments.js), so no wallet is topped up, spent or refunded
+   * anywhere in this app.
+   *
+   * It defaulted to 500 -- five hundred rupees of money that did not exist, on
+   * every account ever created, returned by the auth API as if it were real.
+   * Kept as a field because the API has always returned it and the schema is
+   * where a future wallet would live; kept at 0 because a balance nobody
+   * credited is not a balance.
+   */
+  wallet: { type: Number, default: 0, min: 0 },
+  /**
+   * The reward-point balance.
+   *
+   * Starts at zero and is only ever changed by services/rewards/rewardService.js,
+   * which writes a matching row to models/RewardLedger.js for every movement --
+   * so the balance is always explainable, and the sum of the ledger.
+   *
+   * It used to default to 100, which put points on every dashboard that no
+   * entry anywhere accounted for. New accounts are credited their welcome
+   * points through the ledger instead (config/rewards.js WELCOME_POINTS).
+   */
+  rewards: { type: Number, default: 0, min: 0 },
   vehicles: {
     type: [
       {
-        vehicleType: { type: String }, // 'Car', 'Bike', 'Scooter', 'Other'
-        nickname: { type: String },
-        registrationNumber: { type: String },
-        brand: { type: String },
-        model: { type: String },
-        fuelType: { type: String },
-        color: { type: String },
+        vehicleType: { type: String, trim: true }, // 'Car', 'Bike', 'Scooter', 'Other'
+        nickname: { type: String, trim: true, maxlength: 40 },
+        // Stored the way a number plate is written: upper case, no stray
+        // spaces, so the same car cannot be added twice as "mh12ab1234" and
+        // "MH12AB1234" (the duplicate check in the controller compares these).
+        //
+        // No shape rule here on purpose. The controller's own rule is
+        // deliberately broad (customerController.addVehicle allows letters,
+        // digits and spaces) because plate formats vary -- series, BH-series,
+        // older state formats. A stricter rule in the schema would turn a
+        // plate the API accepted into a 500 at save time, which is worse than
+        // storing an unusual plate.
+        registrationNumber: { type: String, trim: true, uppercase: true, maxlength: 20 },
+        brand: { type: String, trim: true, maxlength: 40 },
+        model: { type: String, trim: true, maxlength: 40 },
+        fuelType: { type: String, trim: true },
+        color: { type: String, trim: true, maxlength: 30 },
         image: { type: String },
         isDefault: { type: Boolean, default: false },
         
@@ -128,7 +178,6 @@ const UserSchema = new mongoose.Schema({
   // so it vanished on another browser and never reached the server at all.
   profileImage: { type: String, default: null },
 
-  createdAt: { type: Date, default: Date.now },
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },
 
@@ -143,7 +192,12 @@ const UserSchema = new mongoose.Schema({
   passwordResetTokenHash: { type: String, default: undefined, select: false },
   passwordResetExpiresAt: { type: Date, default: undefined },
   passwordResetRequestedAt: { type: Date, default: undefined },
-});
+},
+  // createdAt was a plain field with a Date.now default and there was no
+  // updatedAt at all, so nothing recorded when an account last changed.
+  // Existing documents keep the createdAt they already have.
+  { timestamps: true },
+);
 
 /**
  * Supports the sweep that clears expired secret codes.
@@ -159,5 +213,14 @@ UserSchema.index(
   { secretCodeExpiresAt: 1 },
   { partialFilterExpression: { secretCodeExpiresAt: { $type: "date" } } },
 );
+
+// The admin vendor list: "vendors, by status, newest first".
+UserSchema.index({ role: 1, vendorStatus: 1, createdAt: -1 });
+// The admin customer list, and every "how many users" count by role.
+UserSchema.index({ role: 1, createdAt: -1 });
+// Looking an account up by phone (the duplicate-phone check at registration
+// and at profile edit). NOT unique: numbers already stored may repeat, and a
+// unique index would refuse to build on that data rather than say so.
+UserSchema.index({ phone: 1 }, { partialFilterExpression: { phone: { $type: "string" } } });
 
 module.exports = mongoose.model("User", UserSchema);

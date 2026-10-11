@@ -8,6 +8,7 @@ import FuelVehicleStep from "@/components/booking/FuelVehicleStep";
 import DateSlotStep from "@/components/booking/DateSlotStep";
 import QuantityStep from "@/components/booking/QuantityStep";
 import ConfirmPayStep from "@/components/booking/ConfirmPayStep";
+import BookedForSection from "@/components/booking/BookedForSection";
 import FasterStationNotice from "@/components/booking/FasterStationNotice";
 import VehicleArt from "@/components/vehicle/VehicleArt";
 import { useAuthStore } from "@/store/authStore";
@@ -22,6 +23,7 @@ import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { coalesce } from "@/utils/coalesce";
 import { addVehicle } from "@/services/api/customerApi";
 import { toApiError } from "@/services/api/apiClient";
+import { canonicalFuel } from "@/utils/vendorFuels";
 import {
   BOOKING_STEPS,
   PAY_AT_PUMP,
@@ -95,14 +97,22 @@ export default function Booking() {
       seed.stationId = stationId;
       seed.stationName = params.get("stationName");
     }
-    // The nearby-search returns "PETROL"; the station's fuelTypes are
-    // "Petrol". Match the station's casing so the fuel button highlights.
+    // The nearby-search returns "PETROL", a station's fuelTypes say "Petrol".
+    // canonicalFuel() settles it -- capitalising by hand turned "CNG" into
+    // "Cng", which then matched no price and read as "price not published".
     if (fuelType) {
-      seed.fuelType = fuelType.charAt(0).toUpperCase() + fuelType.slice(1).toLowerCase();
+      const canon = canonicalFuel(fuelType);
+      if (canon) seed.fuelType = canon;
     }
     // Only a real bookable label: the nearest-pump card can pass a
     // "HH:MM-HH:MM" bucket, which the server refuses as a start time.
     if (timeSlot && (TIME_SLOTS as readonly string[]).includes(timeSlot)) seed.timeSlot = timeSlot;
+    // "Book for someone else" from the dashboard: the slot is for another
+    // person, so the section starts open with an empty name to fill in.
+    if (params.get("forSomeoneElse") === "1") {
+      seed.bookedForName = "";
+      seed.bookedForPhone = "";
+    }
     if (vehicleId) seed.vehicleId = vehicleId;
     if (vehiclePlate) seed.vehiclePlate = vehiclePlate;
 
@@ -189,11 +199,30 @@ export default function Booking() {
    */
   const unitPrice: number | null = useMemo(() => {
     if (!station || !draft.fuelType) return null;
-    const p = station.uiPrices[draft.fuelType as keyof typeof station.uiPrices];
+    // Read through the canonical label, so a draft carrying "cng" or "Cng"
+    // from an older link still finds the station's CNG price.
+    const key = canonicalFuel(draft.fuelType);
+    const p = key ? station.uiPrices[key] : null;
     return typeof p === "number" && p > 0 ? p : null;
   }, [station, draft.fuelType]);
 
-  const total: number | null = unitPrice === null ? null : draft.quantity * unitPrice + SERVICE_FEE;
+  /**
+   * The quantity this booking comes to, whichever way the customer said it.
+   *
+   * In amount mode this is an ESTIMATE for the screen: the request carries
+   * the rupees and the server divides by the price it holds at that moment
+   * (backend services/booking/fuelAmount.js), so a price change between here
+   * and Confirm is followed rather than ignored.
+   */
+  const effectiveQuantity: number | null =
+    draft.bookBy === "amount"
+      ? unitPrice !== null && unitPrice > 0 && draft.fuelAmount > 0
+        ? Math.round((draft.fuelAmount / unitPrice) * 100) / 100
+        : null
+      : draft.quantity;
+
+  const total: number | null =
+    unitPrice === null || effectiveQuantity === null ? null : effectiveQuantity * unitPrice + SERVICE_FEE;
 
   /**
    * The chosen slot is full on the server's own availability rows, so
@@ -259,7 +288,10 @@ export default function Booking() {
     if (step === 0 && !draftVehicle) return pushToast("Please select a vehicle", "error");
     if (step === 1 && !draft.date) return pushToast("Please select a date", "error");
     if (step === 1 && !draft.timeSlot) return pushToast("Please select a time slot", "error");
-    if (step === 2 && (!draft.quantity || draft.quantity < 1)) {
+    if (step === 2 && draft.bookBy === "amount" && !(draft.fuelAmount > 0)) {
+      return pushToast("Enter the amount you want to spend", "error");
+    }
+    if (step === 2 && draft.bookBy !== "amount" && (!draft.quantity || draft.quantity < 1)) {
       return pushToast("Please enter quantity", "error");
     }
     if (step === 2 && unitPrice === null) {
@@ -274,13 +306,24 @@ export default function Booking() {
     if (unitPrice === null || total === null) {
       return pushToast("This station has not published a price for this fuel", "error");
     }
+    // Ticking "for someone else" and leaving the name blank would send the
+    // attendant a nameless booking; the server refuses it too.
+    if (draft.bookedForName !== null && draft.bookedForName.trim().length < 2) {
+      return pushToast("Enter the name of the person this slot is for", "error");
+    }
+    if (draft.bookedForPhone && !/^[6-9]\d{9}$/.test(draft.bookedForPhone)) {
+      return pushToast("Enter a valid 10-digit mobile number, or leave it blank", "error");
+    }
 
     setSubmitting(true);
     try {
       const { booking } = await createBooking({
         stationId: station.id,
         fuelType: draft.fuelType || "Petrol",
-        quantity: draft.quantity,
+        // One or the other, never both: sending both is refused by the server
+        // (AMBIGUOUS_QUANTITY), because two answers to "how much" is not a
+        // thing to resolve by guessing.
+        ...(draft.bookBy === "amount" ? { fuelAmount: draft.fuelAmount } : { quantity: draft.quantity }),
         price: unitPrice,
         taxes: SERVICE_FEE,
         bookingDate: draft.date || istDateKey(),
@@ -291,6 +334,16 @@ export default function Booking() {
         vehicleName: draftVehicle?.name ?? null,
         // Paid at the petrol pump -- including a waitlist request, once the slot is won.
         payMethod: PAY_AT_PUMP,
+        // Only when the slot was booked for somebody else; the server
+        // validates both and refuses a half-filled pair.
+        ...(draft.bookedForName
+          ? { bookedForName: draft.bookedForName.trim(), bookedForPhone: draft.bookedForPhone || undefined }
+          : {}),
+        // Reward points the customer chose to spend. Only a request: the server
+        // re-checks the balance and the cap and works out the real discount
+        // (backend services/rewards/rewardService.js). Never sent with a waitlist
+        // request -- there is no bill to discount until the slot is actually won.
+        ...(draft.redeemPoints > 0 && !slotFull ? { redeemPoints: draft.redeemPoints } : {}),
         ...(slotFull ? { joinWaitlist: true } : {}),
       });
 
@@ -450,11 +503,16 @@ export default function Booking() {
                   <FasterStationNotice
                     stationId={station.id}
                     fuelType={draft.fuelType}
-                    quantity={draft.quantity}
+                    quantity={effectiveQuantity ?? draft.quantity}
                     date={draft.date}
                     timeSlot={draft.timeSlot}
                     onSwitch={switchStation}
                   />
+                </div>
+              )}
+              {step === 3 && (
+                <div className="mb-4">
+                  <BookedForSection />
                 </div>
               )}
               {step === 3 && (
@@ -509,7 +567,8 @@ export default function Booking() {
               vehicle={draftVehicle}
               date={draft.date}
               timeSlot={draft.timeSlot}
-              quantity={draft.quantity}
+              quantity={effectiveQuantity}
+              fuelAmount={draft.bookBy === "amount" ? draft.fuelAmount : null}
               total={total}
             />
           )}
@@ -535,6 +594,7 @@ function BookingSummary({
   date,
   timeSlot,
   quantity,
+  fuelAmount,
   total,
 }: {
   stationName: string;
@@ -542,7 +602,10 @@ function BookingSummary({
   vehicle: DraftVehicle | null;
   date: string | null;
   timeSlot: string | null;
-  quantity: number;
+  /** null while an amount has been chosen but not yet typed. */
+  quantity: number | null;
+  /** The rupees the customer asked for, when they booked by amount. */
+  fuelAmount?: number | null;
   total: number | null;
 }) {
   const fact = (label: string, value: string | null) => (
@@ -582,7 +645,8 @@ function BookingSummary({
           {fact("Fuel", fuelType)}
           {fact("Date", formatDay(date))}
           {fact("Slot", timeSlot)}
-          {fact("Quantity", `${quantity} L`)}
+          {fact("Quantity", quantity === null ? null : `${quantity} L`)}
+          {fuelAmount ? fact("Fuel budget", `₹${fuelAmount}`) : null}
         </dl>
         <hr className="cx-split" />
         <div className="cx-total">

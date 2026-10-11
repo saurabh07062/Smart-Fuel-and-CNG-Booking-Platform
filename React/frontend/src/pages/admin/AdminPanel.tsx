@@ -5,25 +5,50 @@ import AdminStationsTab from "@/components/admin/AdminStationsTab";
 import AdminOrdersTab from "@/components/admin/AdminOrdersTab";
 import AdminVerifyTab from "@/components/admin/AdminVerifyTab";
 import AdminDashboardTab from "@/components/admin/AdminDashboardTab";
-import AdminSettingsTab from "@/components/admin/AdminSettingsTab";
 import AdminSecurityTab from "@/components/admin/AdminSecurityTab";
-import AdminForecastTab from "@/components/admin/AdminForecastTab";
+import AdminRevenueTab from "@/components/admin/AdminRevenueTab";
+import AdminCommissionTab from "@/components/admin/AdminCommissionTab";
+import AdminDistributionsTab from "@/components/admin/AdminDistributionsTab";
+import AdminCustomersTab from "@/components/admin/AdminCustomersTab";
+import AdminCommunicationTab from "@/components/admin/AdminCommunicationTab";
+import AdminProfileTab from "@/components/admin/AdminProfileTab";
+import { useChatRealtime } from "@/hooks/useChatRealtime";
+import { useChatStore } from "@/store/chatStore";
 import { useAdminStore, type AdminTab } from "@/store/adminStore";
+
+/** The tabs Refresh should reload from the dashboard endpoint. */
+const DASHBOARD_TABS: AdminTab[] = ["dashboard", "inventory", "revenue", "forecast"];
 import { useResync, useSocketEvent } from "@/hooks/useSocket";
 import { coalesce } from "@/utils/coalesce";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 
 /** ADMIN_TABS, in the Vanilla order with the Vanilla icons. */
+/**
+ * The console's sections.
+ *
+ * Four items were removed rather than restyled, because no amount of styling
+ * fixes a screen that should not exist:
+ *
+ *   Inventory   rendered the same stock panel the dashboard already shows
+ *   Revenue     was an "Under Construction" placeholder
+ *   Forecasting was revenue history under a second name -- both now live in
+ *               one Revenue section
+ *   Settings    edited ONE station (the first in the list), which is what
+ *               Manage Stations is for, under a name that promised platform
+ *               configuration
+ */
 const TABS: ConsoleTab<AdminTab>[] = [
   { id: "dashboard", icon: "fa-chart-simple", label: "Dashboard" },
-  { id: "stations", icon: "fa-gas-pump", label: "Manage Stations" },
-  { id: "orders", icon: "fa-box", label: "Orders" },
-  { id: "verify", icon: "fa-qrcode", label: "Scan & Verify" },
-  { id: "security", icon: "fa-shield-halved", label: "Security" },
-  { id: "inventory", icon: "fa-boxes-stacked", label: "Inventory" },
+  { id: "orders", icon: "fa-box", label: "Bookings" },
+  { id: "stations", icon: "fa-gas-pump", label: "Stations" },
+  { id: "customers", icon: "fa-users", label: "Customers" },
+  { id: "communication", icon: "fa-comments", label: "Communication" },
   { id: "revenue", icon: "fa-indian-rupee-sign", label: "Revenue" },
-  { id: "forecast", icon: "fa-chart-line", label: "Forecasting" },
-  { id: "settings", icon: "fa-gear", label: "Settings" },
+  { id: "commission", icon: "fa-percent", label: "Commission" },
+  { id: "distributions", icon: "fa-chart-simple", label: "Distributions" },
+  { id: "security", icon: "fa-shield-halved", label: "Security" },
+  { id: "verify", icon: "fa-user-shield", label: "Verify (support)" },
+  { id: "profile", icon: "fa-user-circle", label: "My Profile" },
 ];
 
 /** ADMIN_COPY. */
@@ -31,10 +56,15 @@ const COPY: Record<AdminTab, string> = {
   dashboard: "Today's activity across every station",
   stations: "Add, edit and take stations offline",
   orders: "Every booking placed on the platform",
-  verify: "Scan a customer's QR or enter their 4-digit code",
+  customers: "Registered customers and their booking activity",
+  communication: "Customer and vendor support conversations",
+  profile: "Your own account and profile photo",
+  verify: "Check a customer in at any station when the vendor cannot",
   security: "Booking requests the risk engine blocked or flagged",
   inventory: "Fuel stock levels by station",
-  revenue: "What the network is earning",
+  revenue: "What the network earns, and what it is forecast to earn",
+  commission: "FuelMart's share of each sale, and the settlements that collect it",
+  distributions: "The shapes the totals hide: waits, fill sizes and booking times",
   forecast: "Projected demand from booking history",
   settings: "Prices, location and platform configuration",
 };
@@ -49,6 +79,10 @@ const COPY: Record<AdminTab, string> = {
  */
 export default function AdminPanel() {
   const navigate = useNavigate();
+  // Support messages arrive live, so the Communication badge is right even
+  // while the admin is on another tab.
+  useChatRealtime();
+  const chatUnread = useChatStore((s) => s.unread?.threads ?? 0);
   const tab = useAdminStore((s) => s.tab);
   const setTab = useAdminStore((s) => s.setTab);
   const loadOrders = useAdminStore((s) => s.loadOrders);
@@ -95,7 +129,7 @@ export default function AdminPanel() {
 
   const refresh = () => {
     if (tab === "stations") void loadStations();
-    else if (tab === "dashboard" || tab === "inventory") void loadDashboard();
+    else if (DASHBOARD_TABS.includes(tab)) void loadDashboard();
     else void loadOrders();
   };
 
@@ -105,24 +139,25 @@ export default function AdminPanel() {
         return <AdminStationsTab />;
       case "orders":
         return <AdminOrdersTab />;
+      case "customers":
+        return <AdminCustomersTab />;
+      case "communication":
+        return <AdminCommunicationTab />;
+      case "profile":
+        return <AdminProfileTab />;
       case "verify":
         return <AdminVerifyTab />;
       case "security":
         return <AdminSecurityTab />;
-      case "settings":
-        return <AdminSettingsTab />;
-      case "forecast":
-        // Real data: GET /api/v1/admin/analytics (gated forecast + sales).
-        return <AdminForecastTab />;
+      // "forecast" is a tab saved before Revenue and Forecasting were merged;
+      // it still resolves, to the section that absorbed it.
+      case "commission":
+        return <AdminCommissionTab />;
+      case "distributions":
+        return <AdminDistributionsTab />;
       case "revenue":
-        // Still a placeholder from the Vanilla console.
-        return (
-          <div className="flex flex-col items-center justify-center h-[60vh]">
-            <i className="fas fa-tools text-6xl mb-4 opacity-50 vm-text-muted" aria-hidden />
-            <h3 className="text-xl font-bold vm-text-muted">Under Construction</h3>
-            <p className="vm-text-muted mt-2">This module is coming in the next update.</p>
-          </div>
-        );
+      case "forecast":
+        return <AdminRevenueTab />;
       case "inventory":
       case "dashboard":
       default:
@@ -135,7 +170,9 @@ export default function AdminPanel() {
       logoIcon="fa-user-shield"
       logoName="Admin Panel"
       logoSub="Secure Access"
-      tabs={TABS}
+      // Communication carries the count of threads waiting for the team, so an
+      // admin on another tab can see that support needs them.
+      tabs={TABS.map((t) => (t.id === "communication" ? { ...t, badge: chatUnread } : t))}
       activeTab={tab}
       onTabChange={(t) => void setTab(t)}
       title="FuelMart Admin"

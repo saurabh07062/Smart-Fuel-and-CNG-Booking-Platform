@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { addWalkIn, fetchWalkIns, updateWalkIn, type VendorWalkIn } from "@/services/api/walkInApi";
+import DataTable from "@/components/common/DataTable";
 import { toApiError } from "@/services/api/apiClient";
 import { useResync, useSocketEvent } from "@/hooks/useSocket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
@@ -144,66 +145,64 @@ export default function WalkInPanel({ stationId, fuelTypes }: Props) {
       {rows.length === 0 ? (
         <p className="text-xs vm-text-muted">No walk-in vehicles in line.</p>
       ) : (
-        <div className="w-full overflow-x-auto">
-          <table className="vm-table">
-            <thead>
-              <tr>
-                <th>Fuel</th>
-                <th>Vehicle</th>
-                <th>Quantity</th>
-                <th>Status</th>
-                <th>Service time</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((w) => {
-                const left = remaining(w);
-                return (
-                  <tr key={w._id}>
-                    <td>{w.fuelType}</td>
-                    <td>{w.vehicleNumber || "Walk-in"}</td>
-                    <td>
-                      {w.quantity} {unitOf(w.fuelType)}
-                    </td>
-                    <td>
-                      {w.status === "serving" ? (
-                        <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-blue-900/30 vm-accent-text">
-                          Fueling · {formatDuration(left ?? 0)} left
-                        </span>
-                      ) : (
-                        <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-yellow-900/30 text-yellow-400">
-                          Waiting
-                        </span>
-                      )}
-                    </td>
-                    <td className="vm-td-sub">{formatDuration(w.serviceDurationSeconds)}</td>
-                    <td>
-                      {w.status === "serving" && (
-                        <button
-                          onClick={() => void act(w, "complete")}
-                          title="Done"
-                          aria-label="Mark walk-in done"
-                          className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-700/50 inline-flex items-center justify-center mr-1"
-                        >
-                          <i className="fas fa-flag-checkered text-xs" aria-hidden />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => void act(w, "cancel")}
-                        title="Remove (left the line)"
-                        aria-label="Remove walk-in"
-                        className="w-8 h-8 rounded-lg bg-red-600/20 text-red-400 border border-red-700/50 inline-flex items-center justify-center"
-                      >
-                        <i className="fas fa-times text-xs" aria-hidden />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          label="Walk-in vehicles in line"
+          rows={rows}
+          rowKey={(w) => w._id}
+          testId="walkin-rows"
+          columns={[
+            { key: "fuel", header: "Fuel", cell: (w) => w.fuelType },
+            { key: "vehicle", header: "Vehicle", cell: (w) => w.vehicleNumber || "Walk-in" },
+            { key: "qty", header: "Quantity", align: "right", cell: (w) => `${w.quantity} ${unitOf(w.fuelType)}` },
+            {
+              key: "status",
+              header: "Status",
+              cell: (w) =>
+                w.status === "serving" ? (
+                  <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-blue-900/30 vm-accent-text">
+                    Fueling · {formatDuration(remaining(w) ?? 0)} left
+                  </span>
+                ) : (
+                  <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-yellow-900/30 text-yellow-400">
+                    Waiting
+                  </span>
+                ),
+            },
+            {
+              key: "service",
+              header: "Service time",
+              hideOnPhone: true,
+              cell: (w) => <span className="vm-td-sub">{formatDuration(w.serviceDurationSeconds)}</span>,
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              align: "right",
+              cell: (w) => (
+                <>
+                  {w.status === "serving" && (
+                    <button
+                      onClick={() => void act(w, "complete")}
+                      title="Done"
+                      aria-label="Mark walk-in done"
+                      className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-700/50 inline-flex items-center justify-center mr-1"
+                    >
+                      <i className="fas fa-flag-checkered text-xs" aria-hidden />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void act(w, "cancel")}
+                    title="Remove (left the line)"
+                    aria-label="Remove walk-in"
+                    className="w-8 h-8 rounded-lg bg-red-600/20 text-red-400 border border-red-700/50 inline-flex items-center justify-center"
+                  >
+                    <i className="fas fa-times text-xs" aria-hidden />
+                  </button>
+                </>
+              ),
+            },
+          ]}
+        />
       )}
     </div>
   );

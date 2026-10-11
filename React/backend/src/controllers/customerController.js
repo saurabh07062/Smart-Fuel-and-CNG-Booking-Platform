@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const { storedPath, removeUploadedFile } = require('../middleware/upload');
@@ -43,6 +44,52 @@ exports.bookings = async (req, res) => {
     res.json(await require('../services/booking/booking').attachWaitlistPositions(bookings));
   } catch (err) {
     console.error(err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+};
+
+/**
+ * Mark the signed-in customer's notifications read.
+ *
+ * POST /api/customer/notifications/read        every unread one
+ * POST /api/customer/notifications/:id/read    just that one
+ *
+ * WHY THIS HAS TO EXIST ON THE SERVER
+ *
+ * Reading something is a fact about the person, not about the tab they read
+ * it in. The client used to mark them read in memory only, and the list is
+ * re-fetched on every reconnect with the server's copy winning (it holds the
+ * authoritative read state) -- so a moment after "mark all read" the whole
+ * panel came back unread, showing the same messages again. The read state has
+ * to be written where the list is read from, or it is not read state at all.
+ *
+ * Scoped to `req.user` on both, so one customer can never mark another's
+ * notifications read -- the id in the URL is a filter, never the authority on
+ * whose row it is.
+ *
+ * Idempotent: marking an already-read notification read changes nothing and
+ * still answers 200. A double tap is not an error.
+ */
+exports.markNotificationsRead = async (req, res) => {
+  try {
+    const userId = req.user && (req.user.userId || req.user.id);
+    if (!userId) return res.status(401).json({ msg: 'Unauthenticated' });
+    if (!Notification) return res.json({ updated: 0, unread: 0 });
+
+    const one = req.params.id;
+    if (one && !mongoose.isValidObjectId(one)) {
+      return res.status(400).json({ msg: 'Invalid notification id' });
+    }
+
+    const filter = { user: userId, read: false, ...(one ? { _id: one } : {}) };
+    const result = await Notification.updateMany(filter, { $set: { read: true, readAt: new Date() } });
+
+    // The badge's own number, counted after the write rather than worked out
+    // by the client, so the two cannot disagree.
+    const unread = await Notification.countDocuments({ user: userId, read: false });
+    res.json({ updated: result.modifiedCount || 0, unread });
+  } catch (err) {
+    console.error('[notifications] marking read failed:', err.message);
     res.status(500).json({ msg: 'Server error' });
   }
 };

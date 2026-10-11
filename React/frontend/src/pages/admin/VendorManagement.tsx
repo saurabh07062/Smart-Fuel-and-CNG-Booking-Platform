@@ -23,6 +23,7 @@ import { useResync, useSocketEvent } from "@/hooks/useSocket";
 import { coalesce } from "@/utils/coalesce";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { formatDate, formatINR, formatINRShort, initial } from "@/utils/consoleFormat";
+import DataTable from "@/components/common/DataTable";
 
 /** VM_TABS. */
 const TABS: ConsoleTab<VmTab>[] = [
@@ -425,62 +426,73 @@ export default function VendorManagement() {
             ))}
           </div>
         ) : (
-          <table className="vm-table">
-            <thead>
-              <tr>
-                <th>Vendor</th>
-                <th>Business</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th>Stations</th>
-                <th>Revenue</th>
-                <th>Joined</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((v) => (
-                <tr key={v._id}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                      <span className="vm-row-avatar" style={{ width: 34, height: 34, fontSize: 13 }}>
-                        {initial(v.name)}
-                      </span>
-                      <div>
-                        <div className="vm-td-name">{v.name || "Unknown"}</div>
-                        <div className="vm-td-sub">{v.email || ""}</div>
-                      </div>
+          <DataTable
+            label="Vendors"
+            rows={visible}
+            rowKey={(v) => v._id}
+            rowTestId={(v) => `vm-vendor-row-${v._id}`}
+            columns={[
+              {
+                key: "vendor",
+                header: "Vendor",
+                cell: (v) => (
+                  <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                    <span className="vm-row-avatar" style={{ width: 34, height: 34, fontSize: 13 }}>
+                      {initial(v.name)}
+                    </span>
+                    <div>
+                      <div className="vm-td-name">{v.name || "Unknown"}</div>
+                      <div className="vm-td-sub">{v.email || ""}</div>
                     </div>
-                  </td>
-                  <td>
+                  </div>
+                ),
+              },
+              {
+                key: "business",
+                header: "Business",
+                cell: (v) => (
+                  <>
                     <div>{v.businessName || "N/A"}</div>
                     <div className="vm-td-sub">{v.vendorCode || v.gstNumber || ""}</div>
-                  </td>
-                  <td>
-                    <VendorStatusBadge status={v.vendorStatus} />
-                  </td>
-                  <td>{v.priorityScore ?? "—"}</td>
-                  <td className="vm-num">{v.stationCount || 0}</td>
-                  <td className="vm-money">{formatINR(v.totalRevenue || 0)}</td>
-                  <td className="vm-td-sub">{formatDate(v.createdAt)}</td>
-                  <td>
-                    <div className="vm-td-actions">
-                      <button
-                        type="button"
-                        className="vm-icon-btn"
-                        onClick={() => void viewDetail(v._id)}
-                        title="View details"
-                        aria-label="View details"
-                      >
-                        <i className="fas fa-eye" aria-hidden />
-                      </button>
-                      <VendorRowActions v={v} a={actions} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                ),
+              },
+              { key: "status", header: "Status", cell: (v) => <VendorStatusBadge status={v.vendorStatus} /> },
+              { key: "priority", header: "Priority", align: "right", hideOnPhone: true, cell: (v) => v.priorityScore ?? "—" },
+              { key: "stations", header: "Stations", align: "right", hideOnPhone: true, cell: (v) => v.stationCount || 0 },
+              {
+                key: "revenue",
+                header: "Revenue",
+                align: "right",
+                cell: (v) => <span className="vm-money">{formatINR(v.totalRevenue || 0)}</span>,
+              },
+              {
+                key: "joined",
+                header: "Joined",
+                hideOnPhone: true,
+                cell: (v) => <span className="vm-td-sub">{formatDate(v.createdAt)}</span>,
+              },
+              {
+                key: "actions",
+                header: "Actions",
+                align: "right",
+                cell: (v) => (
+                  <div className="vm-td-actions">
+                    <button
+                      type="button"
+                      className="vm-icon-btn"
+                      onClick={() => void viewDetail(v._id)}
+                      title="View details"
+                      aria-label="View details"
+                    >
+                      <i className="fas fa-eye" aria-hidden />
+                    </button>
+                    <VendorRowActions v={v} a={actions} />
+                  </div>
+                ),
+              },
+            ]}
+          />
         )}
       </>
     );

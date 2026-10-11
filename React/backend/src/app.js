@@ -187,6 +187,10 @@ app.use("/api/vendor-panel", vendorPanelRoutes);
 app.use("/api/customer", customerRoutes);
 app.use("/api/activation", activationRoutes);
 app.use("/api/vendor-access", vendorAccessRoutes);
+// The assistant and the support conversations (routes/chatRoutes.js). One
+// mount for all three roles; what each may see is decided per request in
+// services/chat/access.js.
+app.use("/api/chat", require("./routes/chatRoutes"));
 
 // v1 API used by the customer/vendor/admin apps.
 app.use("/api/v1/discovery", discoveryRoutes);
@@ -195,6 +199,13 @@ app.use("/api/v1/slots", slotRoutes);
 app.use("/api/superadmin", adminRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/queue", queueRoutes);
+// Reward points: balance, statement and what may be spent on a bill
+// (routes/rewardRoutes.js). Points are SPENT as part of creating a booking,
+// not here.
+app.use("/api/v1/rewards", require("./routes/rewardRoutes"));
+// Commission and end-of-day settlement (routes/commissionRoutes.js): what a
+// vendor owes FuelMart on each sale, and the transfers that collect it.
+app.use("/api/v1/commission", require("./routes/commissionRoutes"));
 
 // Simple health check route
 app.get("/", (req, res) => {

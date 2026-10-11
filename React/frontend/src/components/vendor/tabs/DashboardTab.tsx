@@ -1,6 +1,7 @@
 import { useVendorStore } from "@/store/vendorStore";
 import { VendorFuelBar, VendorLoadPrompt, VendorStatCard } from "../VendorBits";
 import { formatINR } from "@/utils/vendorFormat";
+import Money from "@/components/common/Money";
 
 /** Port of renderVendorDashboardTab(). Same eight stats, same order. */
 export default function DashboardTab() {
@@ -25,10 +26,10 @@ export default function DashboardTab() {
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        <VendorStatCard label="Today's Revenue" value={formatINR(d.todaysRevenue)} icon="fa-wallet" color="emerald" />
+        <VendorStatCard label="Today's Revenue" value={<Money label="today's revenue">{formatINR(d.todaysRevenue)}</Money>} icon="fa-wallet" color="emerald" />
         <VendorStatCard label="Today's Bookings" value={d.todaysBookings} icon="fa-calendar-check" color="blue" />
         <VendorStatCard label="Queue Status" value={`${d.queueStatus} waiting`} icon="fa-users" color="orange" />
-        <VendorStatCard label="Revenue This Month" value={formatINR(d.monthlySales)} icon="fa-chart-line" color="cyan" />
+        <VendorStatCard label="Revenue This Month" value={<Money label="this month's revenue">{formatINR(d.monthlySales)}</Money>} icon="fa-chart-line" color="cyan" />
       </div>
 
       {d.awaitingCollection && d.awaitingCollection.count > 0 && (
@@ -39,7 +40,7 @@ export default function DashboardTab() {
         >
           <i className="fas fa-hand-holding-dollar text-orange-400" aria-hidden />
           <p className="text-sm vm-text">
-            <b>{formatINR(d.awaitingCollection.amount)}</b> awaiting collection at the pump from{" "}
+            <b><Money label="awaiting collection">{formatINR(d.awaitingCollection.amount)}</Money></b> awaiting collection at the pump from{" "}
             {d.awaitingCollection.count} fuelled booking{d.awaitingCollection.count === 1 ? "" : "s"}. It becomes
             revenue once the payment is recorded in Bookings.
           </p>

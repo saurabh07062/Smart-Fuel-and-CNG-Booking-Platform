@@ -55,6 +55,35 @@ export default function VendorCard({ v, a }: { v: ManagedVendor; a: VendorAction
         </div>
         <p className="vm-card-biz">{v.businessName || "No business name"}</p>
         <p className="vm-card-meta">{meta}</p>
+
+        {/*
+          Contact and registration, on the card itself. An admin deciding
+          whether to approve or call a vendor had to open the detail page for
+          a phone number the list already had in hand.
+        */}
+        <ul className="vm-card-lines">
+          <li title={v.email || undefined}>
+            <i className="fas fa-envelope" aria-hidden /> {v.email || "No email"}
+          </li>
+          <li>
+            <i className="fas fa-phone" aria-hidden /> {v.phone || "No phone"}
+          </li>
+          {v.gstNumber && (
+            <li title={v.gstNumber}>
+              <i className="fas fa-file-invoice" aria-hidden /> GST {v.gstNumber}
+            </li>
+          )}
+          {v.vendorAddress && (
+            <li title={v.vendorAddress}>
+              <i className="fas fa-location-dot" aria-hidden /> {v.vendorAddress}
+            </li>
+          )}
+          {v.vendorStatus === "active" && v.activated === false && (
+            <li style={{ color: "var(--z-amber)" }}>
+              <i className="fas fa-key" aria-hidden /> Approved, secret code not redeemed yet
+            </li>
+          )}
+        </ul>
       </div>
 
       <hr className="vm-card-split" />

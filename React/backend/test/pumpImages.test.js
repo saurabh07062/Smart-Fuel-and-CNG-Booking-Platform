@@ -26,11 +26,25 @@ test.after(async () => {
   await require("../src/services/security/rateLimiter").close();
 });
 
-// The smallest valid PNG (1x1). Real image bytes, not a URL.
-const PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-  "base64",
-);
+/**
+ * A PNG whose header says 1600x900. Real image bytes, not a URL.
+ *
+ * It used to be a 1x1 PNG, which the upload rules now refuse: a station photo
+ * has to be at least 800x450 and landscape (services/upload/imageRules.js),
+ * because a thumbnail stretched across the customer's banner looks broken. The
+ * header is what those rules read, so this is the smallest honest fixture.
+ */
+const png1600x900 = () => {
+  const buf = Buffer.alloc(24);
+  buf.writeUInt32BE(0x89504e47, 0); // PNG signature
+  buf.writeUInt32BE(0x0d0a1a0a, 4);
+  buf.writeUInt32BE(13, 8); // IHDR length
+  buf.write("IHDR", 12, "ascii");
+  buf.writeUInt32BE(1600, 16);
+  buf.writeUInt32BE(900, 20);
+  return buf;
+};
+const PNG = png1600x900();
 
 test("pump images against MongoDB", async (t) => {
   const MONGO = testDb.uri();

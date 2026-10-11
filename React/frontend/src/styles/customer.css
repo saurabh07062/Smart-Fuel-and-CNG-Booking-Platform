@@ -2134,3 +2134,866 @@ button.cx-kpi:focus-visible {
 body:has(.cx-app) .fm-picker {
   --pk-accent: var(--primary);
 }
+
+/* ============================================================
+   THE ANDROID APP
+   Same screens as the website, but on a phone they have to behave like an
+   app and not like a page that happens to be narrow. Everything here is
+   scoped to `.is-app`, which main.tsx puts on <html> only in the bundled
+   build -- the website is untouched.
+   ============================================================ */
+
+/* A tap is not a click: no blue flash, no text selection on chrome, no
+   long-press callout on an icon, and no rubber-band scroll of the page
+   behind a sheet. Inputs keep selection, because typing needs it. */
+.is-app,
+.is-app body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.is-app body {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.is-app input,
+.is-app textarea,
+.is-app select,
+.is-app [contenteditable] {
+  user-select: text;
+}
+
+/* The status bar sits over the page (viewport-fit=cover), so the app bar
+   starts below it. */
+.is-app .cx-topbar {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* A phone app bar: the title, and the two controls that belong there. The
+   desktop search box is not one of them -- Stations has its own. */
+.is-app .cx-topbar-inner {
+  padding: 0 14px;
+  gap: 10px;
+}
+.is-app .cx-search {
+  display: none;
+}
+.is-app .cx-top-title {
+  font-size: 17px;
+}
+
+/* Comfortable thumb targets everywhere the app is tapped. */
+.is-app .cx-bottomnav a {
+  min-height: 52px;
+  justify-content: center;
+}
+.is-app .btn,
+.is-app .cx-icon-btn {
+  min-height: 44px;
+}
+.is-app .btn-sm {
+  min-height: 38px;
+}
+
+/* Content clears the bottom bar (and the gesture bar under it) on every
+   page, not only the ones that remembered to pad themselves. */
+.is-app .cx-main {
+  padding-bottom: calc(86px + env(safe-area-inset-bottom));
+}
+
+/* Scrollbars are a desktop affordance; a phone scrolls by touch. */
+.is-app ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Momentum scrolling inside the app's own scroll areas. */
+.is-app .cx-rows,
+.is-app .cx-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- the app's sign-in ------------------------------------------------
+   The website's sign-in is a card floating on a photograph, which is a web
+   page's way of looking substantial. On a phone it wastes the screen: the
+   form should own it. Same markup, app proportions. */
+.is-app .auth-shell,
+.is-app main > form.card,
+.is-app form.card {
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: none;
+}
+.is-app input.input-field,
+.is-app .input-field {
+  min-height: 48px;
+  font-size: 15px;
+}
+.is-app .btn-lg,
+.is-app button[type="submit"] {
+  min-height: 50px;
+  font-size: 15.5px;
+}
+
+/* ============================================================
+   A two-way switch inside a booking step -- "by quantity" or
+   "by amount" (components/booking/QuantityStep.tsx).
+
+   Built from the same tokens as every other customer control, so
+   it follows the app's red identity and dark mode without a
+   colour of its own.
+   ============================================================ */
+
+.cx .cx-seg {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.cx .cx-seg-btn {
+  flex: 1;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cx .cx-seg-btn:hover {
+  color: var(--text);
+}
+.cx .cx-seg-btn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+.cx .cx-seg-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   "One vehicle or several?" -- asked once, after a station is
+   chosen (components/booking/BookingModeSheet.tsx).
+
+   A centred card on a desktop, a bottom sheet on a phone, built
+   from the customer app's own tokens so it follows the theme.
+   ============================================================ */
+
+.cx-mode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(2px);
+}
+.cx-mode-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  padding: 22px;
+  border-radius: 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-xl);
+}
+@media (max-width: 599px) {
+  /* A sheet on a phone: thumb-reachable, and it never covers the whole screen. */
+  .cx-mode-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .cx-mode-sheet {
+    max-width: none;
+    border-radius: 18px 18px 0 0;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+}
+.cx-mode-title {
+  margin: 0 34px 4px 0;
+  font-family: var(--cx-heading);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text);
+}
+.cx-mode-sub {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.cx-mode-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.cx-mode-close:hover {
+  color: var(--text);
+}
+.cx-mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.cx-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg2);
+  text-align: left;
+  cursor: pointer;
+}
+.cx-mode-option:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.cx-mode-option:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.cx-mode-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--primary);
+  font-size: 16px;
+}
+.cx-mode-icon-alt {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.cx-mode-text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cx-mode-text strong {
+  font-size: 13.5px;
+  color: var(--text);
+}
+.cx-mode-text small {
+  font-size: 11.8px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.cx-mode-go {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+/* ============================================================
+   After signing in: "Login successful" -> location -> fuel
+   (components/location/PostLoginFlow.tsx) and the typed-place
+   search it falls back to (PlaceSearchPanel.tsx).
+
+   Same tokens as the rest of the customer app, so it follows the
+   theme; a centred card on a desktop, a bottom sheet on a phone.
+   ============================================================ */
+
+.cx-flow-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+.cx-flow-card {
+  width: 100%;
+  max-width: 430px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 26px 22px 20px;
+  border-radius: 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-xl);
+  text-align: center;
+}
+@media (max-width: 599px) {
+  .cx-flow-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .cx-flow-card {
+    max-width: none;
+    max-height: 92dvh;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.cx-flow-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 22px;
+}
+.cx-flow-badge-ok {
+  background: var(--status-good-bg);
+  color: var(--status-good);
+}
+.cx-flow-title {
+  margin: 0 0 6px;
+  font-family: var(--cx-heading);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+}
+.cx-flow-text {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.cx-flow-warn {
+  color: var(--status-warn);
+}
+.cx-flow-spinner {
+  margin: 8px 0 14px;
+  font-size: 20px;
+  color: var(--primary);
+}
+.cx-flow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.cx-flow-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cx-flow-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.cx-flow-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.cx-flow-btn-primary:hover {
+  color: #fff;
+  filter: brightness(1.06);
+}
+.cx-flow-skip {
+  display: block;
+  margin: 14px auto 0;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* the three fuels */
+.cx-flow-fuels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.cx-flow-fuel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg2);
+  text-align: left;
+  cursor: pointer;
+}
+.cx-flow-fuel:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.cx-flow-fuel:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.cx-flow-fuel > i {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--primary);
+  font-size: 15px;
+}
+.cx-flow-fuel span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cx-flow-fuel strong {
+  font-size: 13.5px;
+  color: var(--text);
+}
+.cx-flow-fuel small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ---------- typed-place search ---------- */
+
+.cx-place {
+  text-align: left;
+  margin-top: 4px;
+}
+.cx-place-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.cx-place-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.cx-place-field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+.cx-place-field > i {
+  color: var(--muted);
+  font-size: 13px;
+}
+.cx-place-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+.cx-place-clear {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+.cx-place-help,
+.cx-place-empty,
+.cx-place-error {
+  margin: 7px 0 0;
+  font-size: 11.8px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.cx-place-error {
+  color: var(--status-bad);
+  font-weight: 600;
+}
+.cx-place-results {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.cx-place-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg2);
+  text-align: left;
+  cursor: pointer;
+}
+.cx-place-result:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.cx-place-result > i {
+  margin-top: 2px;
+  color: var(--primary);
+  font-size: 12px;
+}
+.cx-place-result span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cx-place-result strong {
+  font-size: 13px;
+  color: var(--text);
+}
+.cx-place-result small {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cx-place-map {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12.3px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Reward points
+
+   Two places: the redeem control at checkout (.cx-reward*) and the statement
+   sheet opened from the dashboard tile (.cx-sheet*). The sheet is the same
+   shape as the post-login card above -- centred on a desktop, docked to the
+   bottom edge on a phone, where a dialog in the middle of the screen is
+   awkward to reach.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.cx-reward {
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.cx-reward.is-muted {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg2, var(--card));
+}
+.cx-reward-loading {
+  padding: 10px 2px;
+  font-size: 12px;
+  color: var(--text3, var(--text2));
+}
+.cx-reward-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cx-reward-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--status-warn-bg);
+  color: var(--status-warn);
+  font-size: 14px;
+}
+.cx-reward-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cx-reward-sub,
+.cx-reward-text {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+.cx-reward-toggle {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--primary);
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.cx-reward-toggle:hover {
+  background: var(--primary-light);
+}
+.cx-reward-toggle.is-on {
+  border-color: var(--border);
+  color: var(--text2);
+}
+.cx-reward-label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text3, var(--text2));
+}
+.cx-reward-range {
+  width: 100%;
+  accent-color: var(--primary);
+}
+.cx-reward-saving {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.cx-reward-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text3, var(--text2));
+}
+
+/* The discount line in the booking summary. */
+.cx-total.is-discount .cx-total-value {
+  color: var(--status-ok, var(--primary));
+}
+
+/* ── the statement sheet ── */
+.cx-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+.cx-sheet {
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-xl);
+}
+@media (max-width: 599px) {
+  .cx-sheet-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .cx-sheet {
+    max-width: none;
+    max-height: 92dvh;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  }
+}
+.cx-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.cx-sheet-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.cx-sheet-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+}
+.cx-sheet-note {
+  padding: 14px 2px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text2);
+}
+.cx-sheet-note.is-error {
+  color: var(--status-err, #dc2626);
+}
+.cx-sheet-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text3, var(--text2));
+}
+
+.cx-reward-balance {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: var(--status-warn-bg);
+}
+.cx-reward-balance-points {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text);
+}
+.cx-reward-balance-worth {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.cx-reward-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cx-reward-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.cx-reward-row:last-child {
+  border-bottom: 0;
+}
+.cx-reward-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.cx-reward-row-icon.is-credit {
+  background: var(--status-ok-bg, var(--primary-light));
+  color: var(--status-ok, var(--primary));
+}
+.cx-reward-row-icon.is-debit {
+  background: var(--status-warn-bg);
+  color: var(--status-warn);
+}
+.cx-reward-row-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cx-reward-row-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text3, var(--text2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cx-reward-row-points {
+  flex: 0 0 auto;
+  text-align: right;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.cx-reward-row-points.is-credit {
+  color: var(--status-ok, var(--primary));
+}
+.cx-reward-row-points.is-debit {
+  color: var(--text2);
+}
+.cx-reward-row-points small {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text3, var(--text2));
+}
+
+/*
+  The legal line at the foot of every customer page.
+
+  The sidebar that carries this link on a desktop is display:none under 768px
+  (see .cx-sidebar above), so without this a phone -- and therefore the whole
+  Android app -- had no route to the privacy policy at all. It sits inside
+  .cx-main, which already reserves room for the bottom bar.
+*/
+.cx-foot-legal {
+  margin: 22px 0 4px;
+  text-align: center;
+}

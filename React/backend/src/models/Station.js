@@ -1,36 +1,65 @@
 const mongoose = require("mongoose");
 const { isValidVpa } = require("../services/payment/upi");
 const { clockParts, parseClock, atBusinessTime } = require("../config/businessTime");
+const { CLOCK, onWrite, INDIAN_MOBILE } = require("./shared/fieldValidators");
 
 const ReviewSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  userName: { type: String },
-  rating: { type: Number, required: true },
-  comment: { type: String },
+  // A snapshot of the name shown beside the review, so a later profile rename
+  // does not rewrite what was posted.
+  userName: { type: String, trim: true, maxlength: 120 },
+  rating: { type: Number, required: true, min: 1, max: 5 },
+  comment: { type: String, trim: true, maxlength: 1000 },
   date: { type: Date, default: Date.now },
+});
+
+/**
+ * One day's opening hours. A day is 24h, closed, or open between two "HH:MM"
+ * times -- the three states the booking slot generator understands.
+ */
+const dayHours = (day) => ({
+  // The full dotted path, because these are nested objects rather than
+  // subdocuments: inside the validator `this` is the station, so
+  // isModified("open") would always be false and the rule would never run.
+  open: { type: String, default: "06:00", validate: onWrite(`operatingSchedule.${day}.open`, CLOCK, "open must be HH:MM (24-hour)") },
+  close: { type: String, default: "22:00", validate: onWrite(`operatingSchedule.${day}.close`, CLOCK, "close must be HH:MM (24-hour)") },
+  is24h: { type: Boolean, default: true },
+  isClosed: { type: Boolean, default: false },
 });
 
 const StationSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
+    name: { type: String, required: true, trim: true, maxlength: 160 },
+    // The vendor who owns this pump. Every vendor-panel read is scoped by it,
+    // which is what stops one vendor reaching another's station.
     owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
-    address: { type: String, required: true },
-    city: { type: String, default: "Pune" },
-    state: { type: String, default: "Maharashtra" },
+    address: { type: String, required: true, trim: true, maxlength: 400 },
+    city: { type: String, trim: true, default: "Pune" },
+    state: { type: String, trim: true, default: "Maharashtra" },
 
     openingHours: { type: String, default: "24 Hours" },
+
+    // The number a customer (or an admin) rings when something is wrong at
+    // the pump itself. Optional: an older station has none, and an empty
+    // string is how "not recorded" is stored -- never a placeholder number.
+    contactPhone: {
+      type: String,
+      trim: true,
+      default: "",
+      validate: onWrite("contactPhone", INDIAN_MOBILE, (p) => `"${p.value}" is not a 10-digit phone number`),
+    },
 
     // ---- structured operating schedule --------------------------------
     // Day-wise open/close times, India time. If a day is missing, falls back
     // to openingHours string. "is24h: true" means open all day.
     operatingSchedule: {
-      monday:    { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } },
-      tuesday:   { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } },
-      wednesday: { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } },
-      thursday:  { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } },
-      friday:    { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } },
-      saturday:  { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } },
-      sunday:    { open: { type: String, default: "06:00" }, close: { type: String, default: "22:00" }, is24h: { type: Boolean, default: true }, isClosed: { type: Boolean, default: false } }
+      monday: dayHours("monday"),
+      tuesday: dayHours("tuesday"),
+      wednesday: dayHours("wednesday"),
+      thursday: dayHours("thursday"),
+      friday: dayHours("friday"),
+      saturday: dayHours("saturday"),
+      sunday: dayHours("sunday"),
     },
     images: [{ type: String }],
     // One photo each of the station's petrol and CNG dispensers, uploaded by
@@ -41,8 +70,12 @@ const StationSchema = new mongoose.Schema(
       petrol: { type: String, default: null },
       cng: { type: String, default: null },
     },
-    rating: { type: Number, default: 4.5 },
-    reviews: [ReviewSchema],
+    // No rating until someone has actually rated it. This used to default to
+    // 4.5, so a station nobody had reviewed advertised 4.5 stars to customers.
+    // The API already sends `rating ?? null` and the UI already hides an
+    // absent rating (frontend utils/station.ts), so nothing displays 0.
+    rating: { type: Number, default: null, min: 0, max: 5 },
+    reviews: { type: [ReviewSchema], default: [] },
 
     fuelTypes: { type: [String], default: ["Petrol", "Diesel", "CNG"] },
     // No assumed amenities: a station lists what it actually has.
@@ -95,7 +128,7 @@ const StationSchema = new mongoose.Schema(
       cng: { total: { type: Number, min: 1, max: 20 }, online: { type: Number, min: 0, max: 20 } },
     },
     // The legacy nozzles field (kept for backward compatibility, mapped to total)
-    nozzles: { type: Number, default: 4, min: 1 },
+    nozzles: { type: Number, default: 4, min: 1, max: 20 },
 
     // Live count of vehicles waiting, separated by fuel type (Layer 1 state)
     waitingCounts: {
@@ -133,7 +166,7 @@ const StationSchema = new mongoose.Schema(
         message: (p) => `"${p.value}" is not a valid UPI ID (expected name@bank)`,
       },
     },
-    upiName: { type: String, trim: true, default: null },
+    upiName: { type: String, trim: true, maxlength: 120, default: null },
     acceptsUpi: { type: Boolean, default: true },
 
     // ---- live availability ---------------------------------------------
@@ -145,7 +178,7 @@ const StationSchema = new mongoose.Schema(
       cng: { type: Boolean, default: true },
     },
     isBusy: { type: Boolean, default: false },
-    unavailableReason: { type: String, trim: true, default: null },
+    unavailableReason: { type: String, trim: true, maxlength: 200, default: null },
 
     pricesUpdatedAt: { type: Date, default: null },
     availabilityUpdatedAt: { type: Date, default: null },
@@ -210,6 +243,13 @@ StationSchema.index({ location: "2dsphere" }, { sparse: true });
 
 // The customer list query is always "active stations, nearest first".
 StationSchema.index({ status: 1, updatedAt: -1 });
+
+// The vendor panel: "my stations", and the admin overview's owner lookup.
+StationSchema.index({ owner: 1, status: 1 });
+
+// Searching stations by name or address, from the admin list and the customer
+// search box. A text index, so "baner shell" matches either field.
+StationSchema.index({ name: "text", address: "text" }, { name: "station_text_search" });
 
 /**
  * A usable position: finite, in range, and not the (0, 0) placeholder that

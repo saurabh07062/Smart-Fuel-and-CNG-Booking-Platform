@@ -36,6 +36,7 @@ const PUBLIC_STATION_FIELDS = Object.freeze([
   "location",
   "openingHours",
   "operatingSchedule",
+  "contactPhone",
   "amenities",
   "images",
   "pumpImages",

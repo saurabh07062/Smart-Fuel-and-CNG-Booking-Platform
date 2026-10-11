@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useStationStore } from "@/store/stationStore";
 import { useWatchStations } from "@/hooks/useSocket";
 import { useUiStore } from "@/store/uiStore";
@@ -10,6 +10,9 @@ import { useUiStore } from "@/store/uiStore";
  * "Find Stations" button set `state.isLoggedIn = true` without signing in; here
  * it goes to /stations and the route guard asks a guest to log in first.
  */
+/** The website build; the Android app is customer-only and has no vendor screens. */
+const WEBSITE = import.meta.env.VITE_APP_MODE !== "customer";
+
 const STATS: Array<[string, string, string]> = [
   ["50K+", "Active Users", "fa-users"],
   ["1.2K+", "Fuel Stations", "fa-gas-pump"],
@@ -17,12 +20,12 @@ const STATS: Array<[string, string, string]> = [
 ];
 
 const FEATURES: Array<[string, string, string, string]> = [
-  ["fa-location-crosshairs", "Find Stations", "Real-time geolocation detection shows all nearby petrol pumps and CNG stations with live queue status.", "#2563EB"],
-  ["fa-calendar-check", "Book Slots", "Reserve your time slot, choose fuel type and quantity. No more waiting in long queues at the pump.", "#10B981"],
-  ["fa-qrcode", "QR Pass", "Get a digital QR booking pass. Scan at the station for instant verification and fueling.", "#F97316"],
-  ["fa-wallet", "Pay at the Pump", "No online payment needed. Pay the attendant when you fuel, and get an invoice for every fill.", "#8B5CF6"],
-  ["fa-bell", "Smart Alerts", "Get notified about slot reminders, queue updates, price changes, and exclusive offers.", "#EC4899"],
-  ["fa-shield-halved", "Secure & Fast", "JWT authentication, encrypted data, and OTP verification keep your account safe.", "#06B6D4"],
+  ["fa-location-crosshairs", "Find Stations", "Real-time geolocation detection shows all nearby petrol pumps and CNG stations with live queue status.", "var(--chart-1)"],
+  ["fa-calendar-check", "Book Slots", "Reserve your time slot, choose fuel type and quantity. No more waiting in long queues at the pump.", "var(--chart-2)"],
+  ["fa-qrcode", "QR Pass", "Get a digital QR booking pass. Scan at the station for instant verification and fueling.", "var(--chart-3)"],
+  ["fa-wallet", "Pay at the Pump", "No online payment needed. Pay the attendant when you fuel, and get an invoice for every fill.", "var(--chart-4)"],
+  ["fa-bell", "Smart Alerts", "Get notified about slot reminders, queue updates, price changes, and exclusive offers.", "var(--chart-5)"],
+  ["fa-shield-halved", "Secure & Fast", "JWT authentication, encrypted data, and OTP verification keep your account safe.", "var(--chart-6)"],
 ];
 
 const STEPS: Array<[string, string, string]> = [
@@ -63,15 +66,15 @@ export default function Landing() {
   );
 
   return (
-    <div className="min-h-screen relative overflow-hidden" style={{ background: "var(--bg)" }}>
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+    <div className="min-h-screen relative overflow-x-hidden" style={{ background: "var(--bg)", maxWidth: "100vw" }}>
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ maxWidth: "100vw" }}>
         {blob({ width: 500, height: 500, background: "radial-gradient(circle,rgba(37,99,235,.15),transparent 70%)", top: "-10%", left: "-5%", animation: "blob1 18s ease-in-out infinite" })}
         {blob({ width: 400, height: 400, background: "radial-gradient(circle,rgba(16,185,129,.12),transparent 70%)", top: "40%", right: "-8%", animation: "blob2 22s ease-in-out infinite" })}
         {blob({ width: 350, height: 350, background: "radial-gradient(circle,rgba(249,115,22,.1),transparent 70%)", bottom: "-5%", left: "30%", animation: "blob1 20s ease-in-out infinite reverse" })}
       </div>
 
-      <nav className="relative z-10 flex items-center justify-between px-6 py-4 max-w-7xl mx-auto">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate("/")}>
+      <nav className="relative z-10 flex items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-4 max-w-7xl mx-auto">
+        <div className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0" onClick={() => navigate("/")}>
           <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--primary)" }}>
             <i className="fas fa-gas-pump text-white text-lg" aria-hidden />
           </div>
@@ -82,42 +85,50 @@ export default function Landing() {
           <a href="#how" className="text-sm font-medium" style={{ color: "var(--muted)" }}>How It Works</a>
           <a href="#stats" className="text-sm font-medium" style={{ color: "var(--muted)" }}>Stats</a>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           <button onClick={toggleTheme} className="btn btn-ghost btn-sm" aria-label="Toggle theme">
             <i className={`fas fa-${darkMode ? "sun" : "moon"}`} aria-hidden />
           </button>
-          <button onClick={() => navigate("/login")} className="btn btn-outline btn-sm">Log In</button>
-          <button onClick={() => navigate("/register")} className="btn btn-primary btn-sm">Sign Up</button>
-          <button onClick={() => navigate("/vendor-register")} className="btn btn-accent btn-sm">Vendor Sign Up</button>
-          <button onClick={() => navigate("/vendor/secret-code")} className="btn btn-secret btn-sm">
-            <i className="fas fa-lock" aria-hidden /> Vendor Secret Code
-          </button>
+          <button onClick={() => navigate("/login")} className="btn btn-outline btn-sm whitespace-nowrap">Log In</button>
+          <button onClick={() => navigate("/register")} className="btn btn-primary btn-sm whitespace-nowrap">Sign Up</button>
+          {/* Vendor doors are on the website only: the Android build is the
+              customer app, and it carries no vendor screens to send them to. */}
+          {WEBSITE && (
+            <>
+              <button onClick={() => navigate("/vendor-register")} className="btn btn-accent btn-sm">Vendor Sign Up</button>
+              <button onClick={() => navigate("/vendor/secret-code")} className="btn btn-secret btn-sm">
+                <i className="fas fa-lock" aria-hidden /> Vendor Secret Code
+              </button>
+            </>
+          )}
         </div>
       </nav>
 
-      <section className="relative z-10 max-w-7xl mx-auto px-6 pt-16 pb-24 md:pt-24 md:pb-32">
-        <div className="grid md:grid-cols-2 gap-12 items-center">
-          <div>
+      <section className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-14 md:pt-24 md:pb-32">
+        <div className="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
+          <div className="min-w-0">
             <div className="badge badge-blue mb-6" style={{ animation: "slideUp .5s ease both" }}>
               <i className="fas fa-bolt mr-1" aria-hidden /> Smart Fuel Booking Platform
             </div>
-            <h1 className="text-4xl md:text-6xl font-bold leading-tight mb-6" style={{ animation: "slideUp .6s ease both", fontFamily: "'Space Grotesk'" }}>
+            <h1 className="text-3xl sm:text-4xl md:text-6xl font-bold leading-tight mb-4 md:mb-6" style={{ animation: "slideUp .6s ease both", fontFamily: "'Space Grotesk'" }}>
               Skip the Queue.
               <br />
               <span style={{ color: "var(--primary)" }}>Book Fuel</span> Instantly.
             </h1>
-            <p className="text-lg mb-8 max-w-md" style={{ color: "var(--muted)", animation: "slideUp .7s ease both" }}>
+            <p className="text-base md:text-lg mb-6 md:mb-8 max-w-md" style={{ color: "var(--muted)", animation: "slideUp .7s ease both" }}>
               Find nearby stations, book your fuel slot, pay at the pump, and arrive to a zero-wait experience. Smart fueling for modern India.
             </p>
-            <div className="flex flex-wrap gap-4" style={{ animation: "slideUp .8s ease both" }}>
-              <button onClick={() => navigate("/register")} className="btn btn-primary btn-lg">
+            {/* Full width and stacked on a phone: two buttons side by side at
+                375px leaves each too narrow for its own label. */}
+            <div className="grid sm:flex sm:flex-wrap gap-3 sm:gap-4" style={{ animation: "slideUp .8s ease both" }}>
+              <button onClick={() => navigate("/register")} className="btn btn-primary btn-lg w-full sm:w-auto">
                 <i className="fas fa-rocket" aria-hidden /> Get Started Free
               </button>
-              <button onClick={() => navigate("/stations")} className="btn btn-outline btn-lg">
+              <button onClick={() => navigate("/stations")} className="btn btn-outline btn-lg w-full sm:w-auto">
                 <i className="fas fa-map-marked-alt" aria-hidden /> Find Stations
               </button>
             </div>
-            <div className="flex items-center gap-6 mt-10" style={{ animation: "slideUp .9s ease both" }}>
+            <div className="flex items-center gap-4 mt-7 md:mt-10" style={{ animation: "slideUp .9s ease both" }}>
               <div className="flex -space-x-3">
                 {[101, 102, 103, 104].map((i) => (
                   <img key={i} src={`https://picsum.photos/seed/user${i}/40/40.jpg`} alt="" className="w-9 h-9 rounded-full border-2" style={{ borderColor: "var(--bg)" }} />
@@ -129,8 +140,8 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="relative" style={{ animation: "fadeIn 1s ease .3s both" }}>
-            <div className="card-glass p-6 rounded-2xl" style={{ animation: "float 6s ease-in-out infinite" }}>
+          <div className="relative min-w-0" style={{ animation: "fadeIn 1s ease .3s both" }}>
+            <div className="card-glass p-4 sm:p-6 rounded-2xl" style={{ animation: "float 6s ease-in-out infinite" }}>
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--secondary-light)" }}>
                   <i className="fas fa-map-pin" style={{ color: "var(--secondary)" }} aria-hidden />
@@ -151,7 +162,7 @@ export default function Landing() {
                     <p className="text-sm font-medium truncate">{s.name.split(" - ")[1] ?? s.name}</p>
                     <p className="text-xs" style={{ color: "var(--muted)" }}>{s.distance ?? "—"} km · Queue: {s.queue}</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex-shrink-0">
                     <p className="text-xs font-bold" style={{ color: queueColor(s.queue) }}>{s.waitTime} min</p>
                   </div>
                 </div>
@@ -187,7 +198,7 @@ export default function Landing() {
         <div className="grid md:grid-cols-3 gap-6">
           {FEATURES.map(([icon, title, desc, color], i) => (
             <div key={title} className="card p-6 group hover:-translate-y-1 transition-all" style={{ animation: `slideUp .5s ease ${i * 0.08}s both` }}>
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110" style={{ background: `${color}18` }}>
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110" style={{ background: `color-mix(in srgb, ${color} 9%, transparent)` }}>
                 <i className={`fas ${icon} text-lg`} style={{ color }} aria-hidden />
               </div>
               <h3 className="text-lg font-bold mb-2" style={{ fontFamily: "'Space Grotesk'" }}>{title}</h3>
@@ -239,7 +250,13 @@ export default function Landing() {
             </div>
             <span className="font-bold" style={{ fontFamily: "'Space Grotesk'" }}>FuelMart</span>
           </div>
-          <p className="text-sm" style={{ color: "var(--muted)" }}>2026 FuelMart. All rights reserved. Built for modern India.</p>
+          <p className="text-sm text-center" style={{ color: "var(--muted)" }}>
+            2026 FuelMart. All rights reserved. Built for modern India.
+            <br />
+            <Link to="/privacy" className="pp-link">
+              Privacy Policy
+            </Link>
+          </p>
           <div className="flex gap-4">
             {SOCIALS.map((s) => (
               <a

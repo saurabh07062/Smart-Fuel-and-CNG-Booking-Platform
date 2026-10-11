@@ -1,4 +1,5 @@
 import { apiClient } from "./apiClient";
+import type { Distributions } from "./adminApi";
 import type { Booking, Station } from "@/types";
 import type { HistoryForecast } from "./adminApi";
 
@@ -20,7 +21,7 @@ const BASE = "/vendor-panel";
  */
 export async function registerVendor(
   form: FormData,
-): Promise<{ ok: true; msg?: string; vendorId?: string } | { ok: false; msg: string }> {
+): Promise<{ ok: true; msg?: string; vendorId?: string } | { ok: false; msg: string; field?: string }> {
   try {
     const { data } = await apiClient.post<{ msg?: string; user?: { id?: string } }>(
       "/vendors/register",
@@ -28,12 +29,18 @@ export async function registerVendor(
     );
     return { ok: true, msg: data?.msg, vendorId: data?.user?.id };
   } catch (err) {
-    const ax = err as { code?: string; response?: { status?: number; data?: { msg?: string } | string } };
+    // The API answers a refused field with { msg, field } so the form can
+    // put the message under the right box.
+    const ax = err as {
+      code?: string;
+      response?: { status?: number; data?: { msg?: string; field?: string } | string };
+    };
     if (ax.code === "ECONNABORTED") return { ok: false, msg: "Request timed out. Please try again." };
     if (!ax.response) return { ok: false, msg: "Network error while submitting" };
     const d = ax.response.data;
     const msg = (typeof d === "string" ? d : d?.msg) || `Registration failed (HTTP ${ax.response.status})`;
-    return { ok: false, msg };
+    const field = typeof d === "string" ? undefined : d?.field;
+    return { ok: false, msg, field };
   }
 }
 
@@ -117,6 +124,12 @@ export interface VendorRevenue {
   totalBookings: number;
   fuelSales: Record<string, { quantity: number; revenue: number; transactions?: number }>;
   awaitingCollection: { count: number; amount: number };
+  /**
+   * This month week by week, from the server (revenueWeeksThisMonth).
+   * Optional because an older server will not send it, and a missing trend
+   * must not break the page.
+   */
+  weeks?: Array<{ label: string; from: string; to: string; revenue: number; transactions: number }>;
   basis: string;
   asOf: string;
 }
@@ -130,6 +143,8 @@ export interface VendorEmployee {
   shift?: string;
   salary?: number;
   station?: { _id: string; name: string } | null;
+  /** A path under /uploads, or null for the initial-letter avatar. */
+  photo?: string | null;
 }
 
 export interface VendorReview {
@@ -299,6 +314,18 @@ export interface InventoryAlert {
   label?: string;
 }
 
+/**
+ * DELETE /vendor-panel/stations/:id/inventory/:fuel -- clears that fuel's
+ * stock, tank capacity and its whole stock history. Cannot be undone; the
+ * server refuses while bookings still hold stock (reason ACTIVE_BOOKINGS).
+ */
+export async function resetInventory(stationId: string, fuel: string) {
+  const { data } = await apiClient.delete<{ msg?: string; historyRemoved?: number }>(
+    `${BASE}/stations/${stationId}/inventory/${fuel}`,
+  );
+  return data;
+}
+
 /** One row of GET /vendor-panel/stations/:id/inventory/movements. */
 export interface InventoryMovement {
   id: string;
@@ -327,6 +354,13 @@ export async function fetchInventoryMovements(stationId: string, fuel?: string, 
 /** A booking as the vendor sees it -- the customer is populated. */
 export interface VendorBooking extends Omit<Booking, "user"> {
   user?: { _id?: string; name?: string; phone?: string; email?: string } | string;
+  /**
+   * Populated when this booking is one of several the customer made together
+   * (backend models/FleetBooking.js). The attendant needs it to know that the
+   * van at the pump is the third of five from one visit.
+   */
+  fleetGroup?: { _id?: string; reference?: string; vehicleCount?: number } | string | null;
+  fleetIndex?: number | null;
 }
 
 // ---------------------------------------------------------------- dashboard
@@ -391,11 +425,27 @@ export async function updateVendorStation(id: string, input: UpdateStationInput)
 }
 
 /**
+ * PUT /vendor-panel/stations/:id with a file -- set the station's own photo
+ * (Station.images[0], the wide banner customers see above the pump).
+ *
+ * The same route as the edit above; multipart "stationImages" is what the
+ * server takes (routes/vendorPanelRoutes.js), and an upload replaces the set.
+ * The photo is the vendor's to set: the admin form no longer sends one, so
+ * this is the only place a real picture reaches the station.
+ */
+export async function updateVendorStationPhoto(id: string, file: File) {
+  const body = new FormData();
+  body.append("stationImages", file);
+  const { data } = await apiClient.put<VendorStation>(`${BASE}/stations/${id}`, body);
+  return data;
+}
+
+/**
  * POST /bookings/verify -- check a customer in at the pump with their 4-digit
  * code. The server starts fueling (or queues the car if the nozzle is busy)
  * and completes the booking by itself when the fuel's time is up.
  */
-export async function checkInWithCode(verificationCode: string) {
+export async function checkInWithCode(verificationCode: string, options: { override?: boolean } = {}) {
   const { data } = await apiClient.post<{
     msg?: string;
     started?: boolean;
@@ -410,7 +460,7 @@ export async function checkInWithCode(verificationCode: string) {
       payMethod?: string;
       paymentStatus?: string;
     };
-  }>("/bookings/verify", { verificationCode });
+  }>("/bookings/verify", { verificationCode, ...(options.override ? { override: true } : {}) });
   return data;
 }
 
@@ -538,8 +588,36 @@ export interface AddEmployeeInput {
   station?: string;
 }
 
-export async function addVendorEmployee(input: AddEmployeeInput) {
-  const { data } = await apiClient.post<{ msg?: string }>(`${BASE}/employees`, input);
+/**
+ * The same shape as a customer's vehicle (services/api/customerApi.ts): the
+ * fields as form values and the picture as a file, or plain JSON when there
+ * is no picture — so a staff record added without a photo sends exactly the
+ * request it always did.
+ */
+function employeeBody(input: Record<string, unknown>, file?: File | null) {
+  if (!file) return { body: input, headers: undefined };
+  const fd = new FormData();
+  Object.entries(input).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) fd.append(k, String(v));
+  });
+  fd.append("employeePhoto", file);
+  return { body: fd, headers: { "Content-Type": "multipart/form-data" } };
+}
+
+export async function addVendorEmployee(input: AddEmployeeInput, file?: File | null) {
+  const { body, headers } = employeeBody(input as unknown as Record<string, unknown>, file);
+  const { data } = await apiClient.post<{ msg?: string }>(`${BASE}/employees`, body, { headers });
+  return data;
+}
+
+/** Change a staff record, optionally replacing or clearing the photo. */
+export async function updateVendorEmployee(
+  id: string,
+  input: Partial<AddEmployeeInput> & { removePhoto?: boolean },
+  file?: File | null,
+) {
+  const { body, headers } = employeeBody(input as Record<string, unknown>, file);
+  const { data } = await apiClient.put<{ msg?: string }>(`${BASE}/employees/${id}`, body, { headers });
   return data;
 }
 
@@ -637,5 +715,16 @@ export async function fetchVendorSession() {
   const { data } = await apiClient.get<{ user?: VendorProfile & { _id?: string } }>(
     "/vendor-access/session",
   );
+  return data;
+}
+
+/**
+ * GET /api/vendor-panel/distributions — the same shapes the admin sees,
+ * scoped to this vendor's own stations. The response is identical to the
+ * admin one, so the screen is shared (components/admin/AdminDistributionsTab.tsx
+ * is reused by passing it this fetcher).
+ */
+export async function fetchVendorDistributions(days = 30): Promise<Distributions> {
+  const { data } = await apiClient.get<Distributions>("/vendor-panel/distributions", { params: { days } });
   return data;
 }

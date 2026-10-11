@@ -193,6 +193,11 @@ export default function Login() {
             </Button>
           )}
 
+          <p className="text-center mt-5">
+            <Link to="/privacy" className="pp-link">
+              Privacy Policy
+            </Link>
+          </p>
           <p className="text-center text-[14px] mt-6" style={{ color: "var(--muted)" }}>
             New to FuelMart?{" "}
             <Link to="/register" className="font-bold" style={{ color: "var(--primary)" }}>

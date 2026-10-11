@@ -9,9 +9,14 @@ export type AdminTab =
   | "orders"
   | "verify"
   | "security"
+  | "customers"
   | "inventory"
   | "revenue"
+  | "commission"
+  | "distributions"
   | "forecast"
+  | "communication"
+  | "profile"
   | "settings";
 
 interface AdminState {
@@ -26,6 +31,12 @@ interface AdminState {
   dashboardError: string | null;
 
   editingStationId: string | null;
+  /**
+   * The station whose overview is open. Picking a station shows what it is
+   * doing -- bookings, sales, queue, stock -- and editing is one action
+   * inside that, not the thing a click lands on.
+   */
+  viewingStationId: string | null;
   creatingStation: boolean;
 
   setTab: (tab: AdminTab) => Promise<void>;
@@ -37,12 +48,14 @@ interface AdminState {
   refreshOrdersLive: () => Promise<void>;
   refreshStationsLive: () => Promise<void>;
   setEditingStation: (id: string | null) => void;
+  setViewingStation: (id: string | null) => void;
   setCreatingStation: (v: boolean) => void;
   reset: () => void;
 }
 
 /** Tabs that render the dashboard figures (AdminDashboardTab). */
-const DASHBOARD_TABS: AdminTab[] = ["dashboard", "inventory"];
+/** Tabs whose figures come from GET /api/v1/admin/dashboard. */
+const DASHBOARD_TABS: AdminTab[] = ["dashboard", "inventory", "revenue", "forecast"];
 
 /**
  * Admin console state -- Vanilla's `state.adminTab`, `state.adminStations`,
@@ -65,12 +78,13 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   dashboard: null,
   dashboardError: null,
   editingStationId: null,
+  viewingStationId: null,
   creatingStation: false,
 
   setTab: async (tab) => {
     // Leaving the station manager drops any half-finished edit, so returning
     // lands on the list rather than a form for a station that may be gone.
-    set({ tab, editingStationId: null, creatingStation: false });
+    set({ tab, editingStationId: null, viewingStationId: null, creatingStation: false });
     if (tab === "stations") await get().loadStations();
     if (tab === "orders") await get().loadOrders(get().orderFilters);
     if (DASHBOARD_TABS.includes(tab)) await get().loadDashboard();
@@ -127,7 +141,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         return;
       }
       // Never swap the list under a station form the admin is filling in.
-      if (s.tab !== "stations" || s.editingStationId || s.creatingStation) return;
+      if (s.tab !== "stations" || s.editingStationId || s.viewingStationId || s.creatingStation) return;
       set({ stations: await api.fetchAllStations() });
     } catch {
       /* keep what is on screen */
@@ -135,6 +149,10 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   },
 
   setEditingStation: (editingStationId) => set({ editingStationId, creatingStation: false }),
+
+  // Opening a station's overview closes any form that was open on it, and
+  // the other way round: one station screen at a time.
+  setViewingStation: (viewingStationId) => set({ viewingStationId, editingStationId: null, creatingStation: false }),
   setCreatingStation: (creatingStation) => set({ creatingStation, editingStationId: null }),
 
   reset: () =>

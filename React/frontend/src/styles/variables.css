@@ -46,6 +46,49 @@
   --space-10: 40px;
   --space-12: 48px;
 
+
+  /* ─── Type scale ────────────────────────────────────────────────────────
+     Seven steps, and nothing between them.
+
+     The app had grown 17 different arbitrary sizes in JSX (text-[11px],
+     text-[11.5px], text-[12.5px] …) and 37 more in CSS. Sizes picked one at a
+     time are the clearest sign of a page designed in isolation, and 10-11px
+     body text is below comfortable reading on a phone. These are the only
+     sizes a new component should use.
+     ───────────────────────────────────────────────────────────────────── */
+  --fs-xs: 11.5px;   /* captions, table headers, timestamps */
+  --fs-sm: 13px;     /* secondary text, dense table cells */
+  --fs-base: 14.5px; /* body */
+  --fs-md: 16px;     /* emphasised body, card titles */
+  --fs-lg: 19px;     /* section headings */
+  --fs-xl: 24px;     /* page titles */
+  --fs-2xl: 30px;    /* the one number a dashboard leads with */
+
+  --lh-tight: 1.25;
+  --lh-normal: 1.55;
+  --lh-relaxed: 1.7;
+
+  /* ─── Chart palette ─────────────────────────────────────────────────────
+     One ordered set, so every chart in the product colours its series the
+     same way and the same fuel is the same colour on every screen. Charts
+     were previously given hex values at each call site, which is why the
+     admin and vendor consoles disagreed.
+     ───────────────────────────────────────────────────────────────────── */
+  --chart-1: #2563eb;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #8b5cf6;
+  --chart-5: #ef4444;
+  --chart-6: #06b6d4;
+  --chart-grid: rgba(15, 23, 42, 0.08);
+  --chart-axis: #64748b;
+
+  /* The three fuels, fixed. Petrol green, diesel amber, CNG blue -- the
+     same mapping the station cards already use. */
+  --fuel-petrol: #10b981;
+  --fuel-diesel: #f59e0b;
+  --fuel-cng: #2563eb;
+
   /* Radius scale */
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -88,4 +131,16 @@
   --status-warn-bg: rgba(251, 191, 36, 0.12);
   --status-bad: #f87171;
   --status-bad-bg: rgba(248, 113, 113, 0.12);
+
+  --chart-grid: rgba(241, 245, 249, 0.1);
+  --chart-axis: #94a3b8;
+  --chart-1: #60a5fa;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #f87171;
+  --chart-6: #22d3ee;
+  --fuel-petrol: #34d399;
+  --fuel-diesel: #fbbf24;
+  --fuel-cng: #60a5fa;
 }

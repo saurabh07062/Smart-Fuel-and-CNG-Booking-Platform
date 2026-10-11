@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ reads this instead of android:fullBackupContent.
+
+  Nothing leaves the device, by either route:
+
+    cloud-backup       Google account backup
+    device-transfer    phone-to-phone transfer during setup
+
+  The app's data is the WebView's storage and cookie jar, which hold the
+  signed-in profile and the session cookies. A session restored onto another
+  device is a session nobody signed in for.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The launcher icon on Android 7 and 8.0 (API 24-25), which have no adaptive
+  icons: the same green field and white pump, drawn rather than baked into a
+  PNG per density. Android 8.1 and newer take mipmap-anydpi-v26 instead.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/fuelmart_green" />
+    <item android:drawable="@drawable/ic_fuelmart_pump" />
+</layer-list>

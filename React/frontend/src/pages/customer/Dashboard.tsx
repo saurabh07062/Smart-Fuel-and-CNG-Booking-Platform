@@ -1,32 +1,40 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Booking, UiStation } from "@/types";
 import Layout from "@/components/layout/Layout";
 import EmptyState from "@/components/common/EmptyState";
 import BookingCard from "@/components/booking/BookingCard";
 import CancelBookingSheet from "@/components/booking/CancelBookingSheet";
-import LocationPicker from "@/components/maps/LocationPicker";
+import RewardsSheet from "@/components/rewards/RewardsSheet";
+import QueueInfoCard from "@/components/booking/QueueInfoCard";
+import FindFuelHero from "@/components/booking/FindFuelHero";
+import { pumpsFor, type FuelKey } from "@/utils/fuelPumps";
+import PostLoginFlow from "@/components/location/PostLoginFlow";
 import StationsMap from "@/components/maps/StationsMap";
-import { getLastKnownUserCoords } from "@/utils/geo";
+import StationCard from "@/components/station/StationCard";
+import { getLastKnownUserCoords, haversineKm } from "@/utils/geo";
 import { directionsUrl } from "@/utils/navigation";
-import FuelSelection from "@/components/maps/FuelSelection";
 import VehicleArt from "@/components/vehicle/VehicleArt";
 import { useAuthStore } from "@/store/authStore";
 import { useBookingStore } from "@/store/bookingStore";
 import { bookingRef, paymentState } from "@/utils/payment";
 import { useStationStore } from "@/store/stationStore";
+import { useLocationStore } from "@/store/locationStore";
 import { useWatchStations } from "@/hooks/useSocket";
 import { pushToast } from "@/store/toastStore";
 import { cancelBooking as apiCancelBooking } from "@/services/api/bookingApi";
 import { toApiError } from "@/services/api/apiClient";
-import { formatCurrency, isSlotElapsed, queueLabelOf, queueLevelOf } from "@/utils/format";
+import { isSlotElapsed } from "@/utils/format";
 import { resolveBookingStation } from "@/utils/station";
 import { getVehicleIcon, vehicleDisplayName } from "@/utils/vehicle";
 
 const ACTIVE_STATUSES = ["upcoming", "serving", "waitlisted"];
 /** How many saved vehicles / nearby stations the dashboard previews. */
 const VEHICLE_PREVIEW = 3;
-const NEARBY_PREVIEW = 4;
+/** How many of the nearest stations this page subscribes to for live queue. */
+const WATCHED_STATIONS = 8;
+/** Station cards shown before "Show all". */
+const STATION_PREVIEW = 5;
 
 /** Morning 5 AM-noon, afternoon to 5 PM, evening after that (and through the night). */
 export function greeting(h = new Date().getHours()): string {
@@ -61,6 +69,12 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 export default function Dashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const coords = useLocationStore((s) => s.coords);
+  const askLocation = useLocationStore((s) => s.askLocation);
+  const locationAsked = useLocationStore((s) => s.locationAsked);
+
+  /** The fuel the whole page is about; the picker in the hero sets it. */
+  const [fuel, setFuel] = useState<FuelKey>("Petrol");
 
   const bookings = useBookingStore((s) => s.bookings);
   const showAll = useBookingStore((s) => s.showAll);
@@ -69,6 +83,8 @@ export default function Dashboard() {
 
   const stations = useStationStore((s) => s.stations);
   const stationsLoading = useStationStore((s) => s.loading);
+  /** Set when the pumps on screen came from this device, not from the server. */
+  const stationsStale = useStationStore((s) => s.stale);
   const loadStations = useStationStore((s) => s.load);
 
   useEffect(() => {
@@ -83,15 +99,6 @@ export default function Dashboard() {
     void loadStations();
   };
 
-  /**
-   * "Upcoming" for the KPI card, matching the Vanilla filter exactly: status
-   * upcoming AND the slot has not already elapsed.
-   */
-  const upcoming = useMemo(
-    () => bookings.filter((b) => b.status === "upcoming" && !isSlotElapsed(b.bookingDate, b.timeSlot)),
-    [bookings],
-  );
-
   const activeBookings = useMemo(
     () =>
       bookings.filter(
@@ -99,6 +106,9 @@ export default function Dashboard() {
       ),
     [bookings],
   );
+
+  /** Fills that actually happened -- the customer's own history figure. */
+  const completedCount = useMemo(() => bookings.filter((b) => b.status === "completed").length, [bookings]);
 
   const displayBookings = showAll ? bookings : activeBookings;
   const next = activeBookings[0] ?? null;
@@ -108,14 +118,34 @@ export default function Dashboard() {
     [user],
   );
 
-  const nearby = useMemo(
-    () =>
-      [...stations]
-        .sort((a, b) => (a.distance ?? Number.POSITIVE_INFINITY) - (b.distance ?? Number.POSITIVE_INFINITY))
-        .slice(0, NEARBY_PREVIEW),
-    [stations],
-  );
-  const openStations = stations.filter((s) => s.open).length;
+  /**
+   * Every station with its distance from where the customer is, nearest
+   * first. The station list endpoint does not rank by distance (only
+   * /stations/nearby does), so without this the "nearest pump" could be one
+   * across the city.
+   */
+  const sortedStations = useMemo(() => {
+    const withDistance = coords
+      ? stations.map((st) =>
+          st.lat != null && st.lng != null
+            ? { ...st, distance: Number(haversineKm(coords, { lat: st.lat, lng: st.lng }).toFixed(1)) }
+            : st,
+        )
+      : stations;
+    return [...withDistance].sort(
+      (a, b) => (a.distance ?? Number.POSITIVE_INFINITY) - (b.distance ?? Number.POSITIVE_INFINITY),
+    );
+  }, [stations, coords]);
+
+  /**
+   * The pumps for the chosen fuel: they must list it, have it in stock and
+   * have published a price for it. A station that merely carries a stale
+   * price for a fuel it no longer sells is not an answer to "where can I
+   * fill CNG".
+   */
+  const fuelStations = useMemo(() => pumpsFor(fuel, sortedStations), [sortedStations, fuel]);
+  /** The stations whose live queue this page follows over the socket. */
+  const nearby = useMemo(() => sortedStations.slice(0, WATCHED_STATIONS), [sortedStations]);
 
   // Queue, wait, price and status events are sent to each station's room, so
   // the stations on this page -- the nearby preview and the ones this customer
@@ -133,7 +163,12 @@ export default function Dashboard() {
   );
 
   // The booking whose cancel sheet is open (null = closed).
+  /** The pumps list, or the map of them. List first: it is the faster read. */
+  /** The pumps list, or the map of them. List first: it is the faster read. */
+  const [mapView, setMapView] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  /** The reward-points statement, opened from the points tile. */
+  const [rewardsOpen, setRewardsOpen] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const onCancel = (id: string) => setCancelling(id);
   const confirmCancel = async (reason?: string) => {
@@ -159,11 +194,92 @@ export default function Dashboard() {
     document.getElementById("my-bookings")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  /** The customer Android build; the website gets the wider layout. */
+  const isApp = import.meta.env.VITE_APP_MODE === "customer";
   const firstName = user?.name?.split(" ")[0];
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
 
   // Active / All bookings. On top beside "Best station for you" when nothing
   // is booked; below, under the upcoming booking card, when something is.
+  /**
+   * Every station, on the map and in the list under it -- the customer's own
+   * "where can I fill" view, in the place the four counters used to sit.
+   * Nearest first, because that is the only order a customer standing
+   * somewhere cares about; the map and the rows are the same live data.
+   */
+  /**
+   * The Find Stations view, on the dashboard: the same station cards on the
+   * left and the same live map on the right, so a customer who lands here
+   * can pick a pump without going anywhere else. One card component, so the
+   * two pages cannot drift apart.
+   */
+  /**
+   * The pumps for the fuel chosen above: the nearest one first, each as the
+   * same card the Find Stations page uses, with the map one tap away rather
+   * than always open.
+   */
+  const stationsPanel = (
+    <section className="mb-4">
+      <div className="flex items-center gap-2 mb-2.5">
+        <h2 className="text-[15px] font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>
+          <i className="fas fa-location-dot" style={{ color: "var(--primary)" }} aria-hidden />
+          Nearest {fuel} Pump
+        </h2>
+        {stationsStale ? (
+          <span className="cx-tag is-amber" title={new Date(stationsStale).toLocaleString("en-IN")}>
+            Saved copy
+          </span>
+        ) : (
+          <span className="cx-live">Live</span>
+        )}
+        <div className="cx-segment ml-auto" role="group" aria-label="List or map">
+          <button type="button" className={!mapView ? "is-on" : ""} aria-pressed={!mapView} onClick={() => setMapView(false)}>
+            List
+          </button>
+          <button type="button" className={mapView ? "is-on" : ""} aria-pressed={mapView} onClick={() => setMapView(true)}>
+            Map
+          </button>
+        </div>
+        <button type="button" className="cx-link" onClick={() => navigate("/stations")}>
+          View All Stations <i className="fas fa-arrow-right" aria-hidden />
+        </button>
+      </div>
+
+      {mapView ? (
+        <div>
+          <StationsMap
+            stations={fuelStations.length > 0 ? fuelStations : sortedStations}
+            className="h-[380px] sm:h-[460px]"
+            userCoords={getLastKnownUserCoords()}
+          />
+          <p className="text-[11px] mt-2" style={{ color: "var(--muted)" }}>
+            <i className="fas fa-circle-info mr-1" aria-hidden /> Red pins are open, grey are closed. Select a
+            pin for station details.
+          </p>
+        </div>
+      ) : fuelStations.length === 0 ? (
+        <section className="cx-panel">
+          <EmptyState
+            icon="fa-map-location-dot"
+            title={stationsLoading ? "Loading pumps…" : `No ${fuel} pump listed yet`}
+            subtitle="Set your location above, or try another fuel type."
+          />
+        </section>
+      ) : (
+        <div className="space-y-3" data-testid="pump-list">
+          {fuelStations.slice(0, STATION_PREVIEW).map((st, i) => (
+            <StationCard key={st.id} station={st} index={i} highlightFuel={fuel} />
+          ))}
+          {fuelStations.length > STATION_PREVIEW && (
+            <button type="button" className="btn btn-outline btn-sm w-full" onClick={() => navigate("/stations")}>
+              See all {fuelStations.length} {fuel} pumps <i className="fas fa-arrow-right" aria-hidden />
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+
   const bookingsPanel = (
     <section className="cx-panel" id="my-bookings" style={{ scrollMarginTop: 90 }}>
       <div className="cx-panel-head">
@@ -217,9 +333,18 @@ export default function Dashboard() {
   return (
     <Layout
       title={`${greeting()}${firstName ? ` ${firstName}` : ""}`}
-      subtitle={`${today} · Your fuel bookings at a glance`}
+      subtitle={today}
       onRefresh={refresh}
     >
+      {/* After signing in: "Login successful", a pause, the location ask, then
+          "What do you want?" -- components/location/PostLoginFlow.tsx. */}
+      {askLocation && (
+        <PostLoginFlow
+          onFuelChosen={setFuel}
+          onDone={locationAsked}
+        />
+      )}
+
       <CancelBookingSheet
         open={cancelling !== null}
         waitlisted={bookings.find((x) => String(x._id) === cancelling)?.status === "waitlisted"}
@@ -228,243 +353,265 @@ export default function Dashboard() {
         onConfirm={(reason) => void confirmCancel(reason)}
       />
 
-      {/* Quick actions: in the mobile app only (VITE_APP_MODE=customer), not on the website. */}
-      {import.meta.env.VITE_APP_MODE === "customer" && (
-      <nav className="grid grid-cols-4 gap-2 mb-5" aria-label="Quick actions">
-        {(
-          [
-            ["fa-gas-pump", "Book fuel", () => navigate("/booking")],
-            ["fa-location-arrow", "Nearest", () => navigate("/nearest-pump")],
-            ["fa-car-side", "My vehicles", () => navigate("/my-vehicles")],
-            ["fa-clock-rotate-left", "History", showHistory],
-          ] as const
-        ).map(([icon, label, go]) => (
-          <button
-            key={label}
-            type="button"
-            onClick={go}
-            className="cx-panel flex flex-col items-center justify-center gap-1.5 py-3 min-h-[72px]"
-            style={{ cursor: "pointer" }}
-          >
-            <span className="cx-stat-icon cx-tone-brand" style={{ width: 36, height: 36 }}>
-              <i className={`fas ${icon}`} aria-hidden />
-            </span>
-            <span className="text-[12px] font-semibold" style={{ color: "var(--text)" }}>
-              {label}
-            </span>
-          </button>
-        ))}
-      </nav>
-      )}
+      {rewardsOpen && <RewardsSheet onClose={() => setRewardsOpen(false)} />}
 
-      <div className="cx-kpis">
-        <Kpi
-          icon="fa-calendar-check"
-          tone="cx-tone-red"
-          label="Upcoming Bookings"
-          value={upcoming.length}
-          badge={upcoming.length > 0 ? "Active" : "None booked"}
-          badgeTone={upcoming.length > 0 ? "t-good" : ""}
-          highlight={upcoming.length > 0}
-          onClick={() => navigate("/booking")}
-        />
-        <Kpi
-          icon="fa-wallet"
-          tone="cx-tone-green"
-          label="Wallet Balance"
-          value={formatCurrency(user?.wallet ?? 0)}
-        />
-        <Kpi
-          icon="fa-star"
-          tone="cx-tone-amber"
-          label="Reward Points"
-          value={(user?.rewards ?? 0).toLocaleString()}
-          badge="Member"
-          badgeTone="t-warn"
-        />
-        <Kpi
-          icon="fa-location-dot"
-          tone="cx-tone-slate"
-          label="Nearby Stations"
-          value={stations.length}
-          badge={`${openStations} open`}
-          badgeTone="t-good"
-          onClick={() => navigate("/stations")}
-        />
-      </div>
+      {/*
+        One column, read top to bottom, in the order a customer cares:
+        the fill they have already booked, then booking a new one, then the
+        pumps around them, then their vehicles and their history. No
+        side-by-side panels competing for the same glance.
+      */}
+      {/*
+        One reading order, two shapes. In the phone app it is a single narrow
+        column. On the web the same blocks sit in two columns from xl up --
+        the pump search and the station list where the eye lands, the
+        customer's own things (vehicles, bookings) in a sticky rail beside
+        them -- because a 720px ribbon down the middle of a desktop wastes
+        the screen and makes a web page read like a screenshot of a phone.
+      */}
+      <div
+        className={
+          isApp
+            ? "mx-auto w-full space-y-4"
+            : "grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,380px)]"
+        }
+        style={isApp ? { maxWidth: 720 } : undefined}
+      >
+        <div className="min-w-0 space-y-4">
+        {/* Four numbers, each a way in: bookings, points, history, vehicles. */}
+        <div className="grid grid-cols-2 gap-3 mb-4 lg:grid-cols-4">
+          <StatTile
+            icon="fa-calendar-check"
+            tone="cx-tone-red"
+            value={activeBookings.length}
+            label="Active Bookings"
+            onClick={() => (activeBookings.length > 0 ? showHistory() : navigate("/booking"))}
+            testId="stat-active-bookings"
+          />
+          {/* Points are earned on completed fills and spent as a discount at
+              checkout; this opens the statement behind the number. */}
+          <StatTile
+            icon="fa-star"
+            tone="cx-tone-amber"
+            value={(user?.rewards ?? 0).toLocaleString("en-IN")}
+            label="Reward Points"
+            onClick={() => setRewardsOpen(true)}
+            testId="stat-reward-points"
+          />
+          <StatTile
+            icon="fa-circle-check"
+            tone="cx-tone-green"
+            value={completedCount}
+            label="Completed Bookings"
+            onClick={showHistory}
+            testId="stat-completed"
+          />
+          <StatTile
+            icon="fa-car-side"
+            tone="cx-tone-slate"
+            value={vehicles.length}
+            label="Saved Vehicles"
+            onClick={() => navigate("/my-vehicles")}
+            testId="stat-vehicles"
+          />
+        </div>
 
-      <div className="grid gap-5 items-start lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-5 min-w-0">
-          {/* Left column: the upcoming booking, or (with none) the bookings list. */}
-          {next ? (
+        {/* What is happening right now, if anything is. */}
+        {next && (
+          <div className="mb-4">
             <NextBookingPanel
               booking={next}
               stations={stations}
               onOpen={() => navigate(`/confirmation/${next._id}`)}
             />
-          ) : (
-            bookingsPanel
-          )}
-          <section className="cx-panel">
-            <div className="cx-panel-head">
-              <div className="flex items-center gap-3 min-w-0">
-                <h2 className="cx-panel-title">
-                  <i className="fas fa-map-location-dot" aria-hidden /> Stations near you
-                </h2>
-                <span className="cx-live">Live</span>
-              </div>
-              <button type="button" className="btn btn-outline btn-sm" onClick={() => navigate("/stations")}>
-                View Map <i className="fas fa-arrow-right" aria-hidden />
-              </button>
-            </div>
-            {/* Every station with a real location, live (the store is patched by socket events). */}
-            <div className="px-4 pt-4 sm:px-5">
-              <StationsMap stations={stations} userCoords={getLastKnownUserCoords()} className="h-[300px] sm:h-[340px]" />
-            </div>
-            <div className="cx-panel-body is-flush">
-              {nearby.length === 0 ? (
-                <p className="py-8 text-center text-sm" style={{ color: "var(--muted)" }}>
-                  {stationsLoading ? "Loading nearby stations…" : "No stations to show yet."}
-                </p>
-              ) : (
-                <div className="cx-rows">
-                  {nearby.map((s) => (
-                    <NearbyStationRow
-                      key={s.id}
-                      station={s}
-                      onOpen={() => navigate(`/stations/${s.id}`)}
-                      onBook={() => navigate(`/booking?stationId=${s.id}`)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+          </div>
+        )}
 
-          {next && bookingsPanel}
+        <FindFuelHero fuel={fuel} onFuel={setFuel} stations={sortedStations} />
+
+        {/* Shortcuts, in the mobile app only (VITE_APP_MODE=customer). */}
+        {isApp && (
+          <nav className="grid grid-cols-5 gap-2 mb-4" aria-label="Quick actions">
+            {(
+              [
+                ["fa-gas-pump", "Book", () => navigate("/booking")],
+                ["fa-location-arrow", "Nearest", () => navigate("/nearest-pump")],
+                ["fa-car-side", "Vehicles", () => navigate("/my-vehicles")],
+                ["fa-clock-rotate-left", "History", showHistory],
+                // A demonstration of the whole booking journey, on sample
+                // data (pages/customer/Simulation.tsx). It books nothing.
+                ["fa-flask", "Demo", () => navigate("/simulation")],
+              ] as const
+            ).map(([icon, label, go]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={go}
+                className="cx-panel flex flex-col items-center justify-center gap-1 py-2.5"
+                style={{ cursor: "pointer" }}
+              >
+                <i className={`fas ${icon}`} style={{ color: "var(--primary)" }} aria-hidden />
+                <span className="text-[11px] font-semibold" style={{ color: "var(--text)" }}>
+                  {label}
+                </span>
+              </button>
+            ))}
+          </nav>
+        )}
+
+        {/* Booking for a family member or a driver: same flow, their name on
+            the booking so the attendant hands the fill to the right person. */}
+        <button
+          type="button"
+          // Straight to the station search, not to this customer's nearest
+          // pump: the person they are booking for may be in another city.
+          onClick={() => navigate("/stations?forSomeoneElse=1")}
+          className="cx-panel flex w-full items-center gap-3 px-4 py-3.5 text-left mb-4"
+          data-testid="book-for-someone-else"
+        >
+          <span className="cx-stat-icon cx-tone-brand" style={{ width: 44, height: 44, flex: "0 0 auto" }}>
+            <i className="fas fa-user-group" aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-bold" style={{ color: "var(--text)" }}>
+              Book for someone else
+            </span>
+            <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
+              Pick the pump in their city, add their name — the booking, the PIN and the payment stay with you.
+            </span>
+          </span>
+          <i className="fas fa-chevron-right text-[12px]" style={{ color: "var(--muted)" }} aria-hidden />
+        </button>
+
+        {/* Several vehicles in one visit. Beside "Book for someone else"
+            because they are the same kind of thing -- a booking that is not
+            the plain one -- and because a fleet owner should not have to find
+            it in the sidebar to discover it exists. */}
+        <button
+          type="button"
+          onClick={() => navigate("/fleet-booking")}
+          className="cx-panel flex w-full items-center gap-3 px-4 py-3.5 text-left mb-4"
+          data-testid="dashboard-fleet-booking"
+        >
+          <span className="cx-stat-icon cx-tone-brand" style={{ width: 44, height: 44, flex: "0 0 auto" }}>
+            <i className="fas fa-truck-fast" aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-bold" style={{ color: "var(--text)" }}>
+              Fleet booking — several vehicles
+            </span>
+            <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
+              Book a slot for each vehicle in one go. One group PIN, paid together at the pump.
+            </span>
+          </span>
+          <i className="fas fa-chevron-right text-[12px]" style={{ color: "var(--muted)" }} aria-hidden />
+        </button>
+
+        {stationsPanel}
+
         </div>
 
-        <div className="space-y-5 min-w-0">
-          {/* Right column: "Best station for you" first. */}
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-[88px]">
+          {/* The customer's own things, beside the search rather than under it. */}
           <section className="cx-panel">
             <div className="cx-panel-head">
               <h2 className="cx-panel-title">
-                <i className="fas fa-crosshairs" aria-hidden /> Best station for you
-              </h2>
-            </div>
-            <div className="cx-panel-body cx-unwrap">
-              <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
-                Set your location and choose a fuel. We rank stations by distance, live queue and price.
-              </p>
-              {/* FuelSelection renders inside the picker's card, where the
-                  Vanilla #dashboard-geo-display block lived -- not below it. */}
-              <LocationPicker>
-                <FuelSelection />
-              </LocationPicker>
-            </div>
-          </section>
-          <section className="cx-panel">
-            <div className="cx-panel-head">
-              <h2 className="cx-panel-title">
-                <i className="fas fa-car-side" aria-hidden /> My Vehicles
+                <i className="fas fa-car-side" aria-hidden /> Your Vehicles
               </h2>
               <button type="button" className="cx-link" onClick={() => navigate("/my-vehicles")}>
-                Manage <i className="fas fa-arrow-right" aria-hidden />
+                Manage Vehicles <i className="fas fa-arrow-right" aria-hidden />
               </button>
             </div>
             <div className={`cx-panel-body ${vehicles.length > 0 ? "is-flush" : ""}`}>
-              {vehicles.length === 0 ? (
-                <div className="text-center py-1">
-                  <VehicleArt type="Car" size={52} radius={14} className="mx-auto mb-3" />
-                  <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-                    No saved vehicles
-                  </p>
-                  <p className="text-xs mt-1 mb-3" style={{ color: "var(--muted)" }}>
-                    Save a car or bike once and pick it in one tap when you book.
-                  </p>
-                  <button className="btn btn-outline btn-sm" onClick={() => navigate("/my-vehicles")}>
-                    <i className="fas fa-plus" aria-hidden /> Add Vehicle
-                  </button>
-                </div>
-              ) : (
+              {vehicles.length > 0 && (
                 <div className="cx-rows">
                   {vehicles.slice(0, VEHICLE_PREVIEW).map((v) => (
                     <button
                       type="button"
-                      className="cx-row"
                       key={String(v._id)}
                       onClick={() => navigate("/my-vehicles")}
+                      className="cx-row"
                     >
-                      <VehicleArt type={v.vehicleType} image={v.image} size={40} radius={11} />
+                      <VehicleArt type={v.vehicleType} image={v.image} size={42} radius={11} />
                       <div className="cx-row-main">
-                        <div className="cx-row-name">{vehicleDisplayName(v)}</div>
-                        <div className="cx-row-sub">
-                          {v.vehicleType || "Car"} · {v.fuelType || "Petrol"}
-                          {v.isDefault ? " · Default" : ""}
+                        <div className="cx-row-name">{v.vehicleType || "Car"}</div>
+                        <div className="cx-row-sub">{vehicleDisplayName(v)}</div>
+                        <div className="flex gap-1.5 mt-1 flex-wrap">
+                          <span className="cx-tag is-green">{v.fuelType || "Petrol"}</span>
+                          {v.isDefault && <span className="cx-tag is-green">Default</span>}
                         </div>
                       </div>
                       <span className="cx-plate">{v.registrationNumber || "—"}</span>
                     </button>
                   ))}
-                  {vehicles.length > VEHICLE_PREVIEW && (
-                    <button
-                      type="button"
-                      className="cx-link justify-center py-2.5"
-                      onClick={() => navigate("/my-vehicles")}
-                    >
-                      +{vehicles.length - VEHICLE_PREVIEW} more
-                    </button>
-                  )}
                 </div>
               )}
+              <div className={vehicles.length > 0 ? "px-4 py-3 sm:px-5" : ""}>
+                {vehicles.length === 0 && (
+                  <p className="text-[12px] mb-3" style={{ color: "var(--muted)" }}>
+                    Save a car or bike once, then pick it in one tap when you book.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-outline w-full"
+                  onClick={() => navigate("/my-vehicles")}
+                >
+                  <i className="fas fa-plus" aria-hidden /> Add Vehicle
+                </button>
+              </div>
             </div>
           </section>
 
-        </div>
+          {bookingsPanel}
+        </aside>
       </div>
     </Layout>
   );
 }
 
-/** One admin-style KPI card: icon and status badge, label, value. */
-function Kpi({
+
+/** One dashboard figure: icon tile, the number, its label, and a way in. */
+function StatTile({
   icon,
   tone,
-  label,
   value,
-  badge,
-  badgeTone = "",
-  highlight = false,
+  label,
   onClick,
+  testId,
 }: {
   icon: string;
   tone: string;
+  value: number | string;
   label: string;
-  value: ReactNode;
-  badge?: string;
-  badgeTone?: string;
-  highlight?: boolean;
   onClick?: () => void;
+  testId?: string;
 }) {
-  const content = (
+  const inner = (
     <>
-      <div className="cx-kpi-top">
-        <span className={`cx-stat-icon ${tone}`}>
-          <i className={`fas ${icon}`} aria-hidden />
+      <span className={`cx-stat-icon ${tone}`} style={{ width: 44, height: 44, flex: "0 0 auto" }}>
+        <i className={`fas ${icon}`} aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xl font-extrabold leading-tight" style={{ color: "var(--text)" }}>
+          {value}
         </span>
-        {badge && <span className={`cx-kpi-badge ${badgeTone}`}>{badge}</span>}
-      </div>
-      <p className="cx-kpi-label">{label}</p>
-      <p className="cx-kpi-value">{value}</p>
+        <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
+          {label}
+        </span>
+      </span>
+      {onClick && <i className="fas fa-chevron-right text-[12px]" style={{ color: "var(--muted)" }} aria-hidden />}
     </>
   );
-  const cls = `cx-kpi ${highlight ? "is-highlight" : ""}`;
+  const cls = "cx-panel flex items-center gap-3 px-4 py-3.5 text-left w-full";
   return onClick ? (
-    <button type="button" className={cls} onClick={onClick}>
-      {content}
+    <button type="button" className={cls} onClick={onClick} data-testid={testId}>
+      {inner}
     </button>
   ) : (
-    <div className={cls}>{content}</div>
+    <div className={cls} data-testid={testId}>
+      {inner}
+    </div>
   );
 }
 
@@ -515,6 +662,11 @@ function NextBookingPanel({
         </button>
       </div>
       <div className="cx-panel-body">
+        {b.queueInfo && b.status === "upcoming" && (
+          <div className="mb-4">
+            <QueueInfoCard info={b.queueInfo} />
+          </div>
+        )}
         <div className="flex items-start gap-4 flex-wrap">
           <span className="cx-stat-icon cx-tone-red" style={{ width: 52, height: 52, fontSize: 20, borderRadius: 14 }}>
             <i className="fas fa-gas-pump" aria-hidden />
@@ -558,53 +710,3 @@ function NextBookingPanel({
   );
 }
 
-function NearbyStationRow({
-  station: s,
-  onOpen,
-  onBook,
-}: {
-  station: UiStation;
-  onOpen: () => void;
-  onBook: () => void;
-}) {
-  return (
-    <div
-      className="cx-row"
-      role="link"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.target === e.currentTarget && e.key === "Enter") onOpen();
-      }}
-    >
-      <span className={`cx-row-avatar ${s.open ? "cx-tone-red" : "cx-tone-slate"}`}>
-        <i className="fas fa-gas-pump" aria-hidden />
-      </span>
-      <div className="cx-row-main">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="cx-row-name">{s.name}</span>
-          {!s.open && <span className="cx-tag is-red">Closed</span>}
-        </div>
-        <div className="cx-row-sub">
-          {s.distance != null ? `${s.distance} km · ` : ""}
-          {s.fuelTypes.map((f) => `${f} ₹${s.uiPrices[f as keyof typeof s.uiPrices] ?? "—"}`).join(" · ")}
-        </div>
-      </div>
-      <span className={`queue-pill ${queueLevelOf(s.queueStatus)} hidden sm:inline-flex`} title={queueLabelOf(s.queueStatus)}>
-        <span className="dot" />
-        {s.waitTime} min
-      </span>
-      <button
-        type="button"
-        className="btn btn-outline btn-sm"
-        disabled={!s.open}
-        onClick={(e) => {
-          e.stopPropagation();
-          onBook();
-        }}
-      >
-        Book
-      </button>
-    </div>
-  );
-}

@@ -90,6 +90,16 @@ function authConfigProblems(env = process.env) {
     problems.push("COOKIE_SECURE=false is not allowed in production (session cookies would travel over plain HTTP)");
   }
 
+  // The check-in testing switch (services/booking/stationArrival.js) turns off
+  // the location, distance and early-window checks. The service ignores it in
+  // production anyway; refusing to start as well means nobody deploys believing
+  // it is in effect, and nobody deploys having forgotten it is set.
+  if (isProduction(env) && String(env.CHECKIN_DEMO_MODE || "").toLowerCase() === "true") {
+    problems.push(
+      "CHECKIN_DEMO_MODE=true is not allowed in production (it skips the location, distance and early-window checks on check-in)",
+    );
+  }
+
   return problems;
 }
 

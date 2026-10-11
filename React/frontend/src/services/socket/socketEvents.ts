@@ -28,6 +28,14 @@ export const SOCKET_EVENTS = {
   NOTIFICATION_CREATED: "notification:created",
   /** Addressed to one customer: { bookingId, position, etaMinutes } (services/queue/stationQueue.js). */
   ETA_UPDATE: "eta_update",
+  /**
+   * Support chat (backend services/chat/notify.js). Addressed: a message only
+   * reaches the thread's own participants, plus the admin room for the two
+   * support channels -- never a broadcast.
+   */
+  CHAT_MESSAGE: "chat:message",
+  CHAT_CONVERSATION: "chat:conversation",
+  CHAT_READ: "chat:read",
 } as const;
 
 export type SocketEvent = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];

@@ -2,6 +2,8 @@ import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import type { ApiError } from "@/types";
 import { recordServerDate } from "@/utils/serverClock";
 import { TAB_HEADER, tabId } from "@/utils/tabId";
+import { apiBaseUrl, IS_NATIVE_BUILD, serverBase } from "./serverAddress";
+import { capacitorAdapter } from "./nativeTransport";
 
 /**
  * The single Axios instance every API module uses.
@@ -17,13 +19,44 @@ import { TAB_HEADER, tabId } from "@/utils/tabId";
  * script can read either -- which is the point -- so nothing here stores,
  * reads or attaches a token: the browser sends the cookies itself.
  */
+/**
+ * On the web, "/api" and the browser's own networking. In the Android app,
+ * the server's absolute address (services/api/serverAddress.ts) over
+ * Capacitor's native HTTP (services/api/nativeTransport.ts), because the
+ * bundled app's pages have no origin to be relative to and its cookies
+ * cannot survive a cross-origin browser request.
+ */
+const transport = IS_NATIVE_BUILD ? { adapter: capacitorAdapter } : {};
+
+/**
+ * Says "this is the Android app" to the API.
+ *
+ * The app's requests are made by Android, not by the WebView, so they carry
+ * no Origin header -- and the server refuses a cookie-authenticated POST
+ * with no origin, because for a browser that would be a forged cross-site
+ * request (backend middleware/origin.js). This header is how the app is
+ * recognised as the one client for which "no origin" is normal.
+ */
+const clientHeaders = IS_NATIVE_BUILD ? { "X-FM-Client": "android" } : {};
+
 export const apiClient = axios.create({
-  baseURL: "/api",
+  baseURL: apiBaseUrl(),
   timeout: 20000,
   withCredentials: true,
   // Which tab this is: the server keeps a separate session per tab.
-  headers: { [TAB_HEADER]: tabId() },
+  headers: { [TAB_HEADER]: tabId(), ...clientHeaders },
+  ...transport,
 });
+
+/**
+ * Point every client at a new server address, after someone changes it in
+ * the app. Called by the "Server address" screen; a no-op on the web.
+ */
+export function applyServerBase(): void {
+  const base = apiBaseUrl();
+  apiClient.defaults.baseURL = base;
+  sessionClient.defaults.baseURL = base;
+}
 
 // Keep the device's view of the server clock current (utils/serverClock.ts):
 // fueling countdowns are timed from server timestamps.
@@ -56,7 +89,13 @@ export function configureSession(hooks: Partial<typeof sessionHooks>) {
 }
 
 // Refreshing must not pass through the 401 handler below.
-const sessionClient = axios.create({ baseURL: "/api", timeout: 20000, withCredentials: true, headers: { [TAB_HEADER]: tabId() } });
+const sessionClient = axios.create({
+  baseURL: apiBaseUrl(),
+  timeout: 20000,
+  withCredentials: true,
+  headers: { [TAB_HEADER]: tabId(), ...clientHeaders },
+  ...transport,
+});
 
 /**
  * A tab opened after someone signed in, in another tab, starts with that
@@ -67,7 +106,15 @@ const sessionClient = axios.create({ baseURL: "/api", timeout: 20000, withCreden
 export async function adoptBrowserSession<T>(): Promise<T | null> {
   try {
     // X-FM-Adopt: signed out is a normal answer here ({ user: null }), not a 401.
-    const { data } = await sessionClient.post<{ user?: T | null }>("/auth/refresh", undefined, { headers: { "X-FM-Adopt": "1" } });
+    //
+    // A short timeout on purpose: this runs at startup, and with no network
+    // the default 20s would hold the splash screen for 20 seconds. The app
+    // draws without it (hooks/useAuthBoot.ts) and adopts the session late if
+    // the answer arrives.
+    const { data } = await sessionClient.post<{ user?: T | null }>("/auth/refresh", undefined, {
+      headers: { "X-FM-Adopt": "1" },
+      timeout: 6000,
+    });
     return data?.user ?? null;
   } catch {
     return null;
@@ -155,6 +202,8 @@ export function uploadUrl(value?: string | null): string | null {
   const v = String(value).trim();
   if (!v) return null;
   if (/^(https?:|data:|blob:)/i.test(v)) return v;
-  if (v.startsWith("/uploads/")) return v; // proxied in dev, same-origin in prod
+  // Proxied in dev and same-origin in production; in the Android app the
+  // pages are local files, so a photo needs the server's own address.
+  if (v.startsWith("/uploads/")) return `${serverBase()}${v}`;
   return null;
 }

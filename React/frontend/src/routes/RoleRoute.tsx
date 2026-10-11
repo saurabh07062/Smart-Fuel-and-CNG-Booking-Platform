@@ -40,7 +40,24 @@ export default function RoleRoute({ allow, children, requireActivatedVendor }: P
   if (!allow.includes(user.role)) {
     // Another role's page: send them to their own home, never to a sign-in
     // page (they are signed in) and never into that role's area.
-    return <Navigate to={authDestination(user)} replace />;
+    const home = authDestination(user);
+    /**
+     * Unless home IS this page.
+     *
+     * Then redirecting would hand the same route back to this same gate, which
+     * would redirect again -- a loop that renders nothing at all. A white
+     * screen is the worst possible way to report a problem, and in the Android
+     * app it is the only thing the person sees.
+     *
+     * It happened for real: registration returned a user with no `role`
+     * (backend controllers/authController.js), so `allow.includes(undefined)`
+     * was false while authDestination sent customers to /dashboard -- the very
+     * address being guarded. The response is fixed; this makes the gate
+     * incapable of producing a blank screen whatever the server sends, because
+     * a page that renders is something a person can act on.
+     */
+    if (home !== pathname) return <Navigate to={home} replace />;
+    return <>{children}</>;
   }
 
   /**

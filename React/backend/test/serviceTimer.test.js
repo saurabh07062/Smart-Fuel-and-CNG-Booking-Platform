@@ -141,11 +141,23 @@ test("service timers against MongoDB", async (t) => {
       );
 
       await waitFor(async () => (await reload(b)).status === "completed", 3000, "second fill");
-      // The status flips first; the stock movement is the next write (bookingCompletion.js).
-      await waitFor(async () => (await sales(s)) >= 2, 5000, "both sales recorded").catch(() => {});
+      // The status flips first; the stock movement is the next write
+      // (bookingCompletion.js). Waited for properly: the old version gave it
+      // 5 s and SWALLOWED the timeout, so a machine that was a moment slow
+      // failed on the next line as "1 !== 2" instead of saying what it was
+      // waiting for. Longer, and allowed to fail with its own message.
+      await waitFor(async () => (await sales(s)) >= 2, 20_000, "both sales recorded");
       assert.equal(await sales(s), 2, "each car's fuel deducted once");
       assert.equal(await Booking.countDocuments({ station: s._id, status: "serving" }), 0, "nozzle released at the end");
-      assert.equal(await Notification.countDocuments({ booking: { $in: [a._id, b._id] }, type: "booking_completed" }), 2);
+      // Waited for, not asserted outright: the completion notification is
+      // written AFTER the sale (services/queue/serviceTimer.js announceCompleted
+      // runs once completeBooking returns), so sales reaching 2 does not mean
+      // the second notification has landed yet. Asserting straight away passed
+      // on an idle machine and failed under load as a bare "1 !== 2".
+      const completedNotes = async () =>
+        Notification.countDocuments({ booking: { $in: [a._id, b._id] }, type: "booking_completed" });
+      await waitFor(async () => (await completedNotes()) >= 2, 20_000, "both completion notifications");
+      assert.equal(await completedNotes(), 2, "each customer told once");
     });
 
     await t.test("duplicate timers and racing completions complete a booking once", async () => {

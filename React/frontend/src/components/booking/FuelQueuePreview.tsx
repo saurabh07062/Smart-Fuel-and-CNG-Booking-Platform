@@ -5,6 +5,7 @@ import { useResync, useSocketEvent, useWatchStation } from "@/hooks/useSocket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { coalesce } from "@/utils/coalesce";
 import { useStationStore } from "@/store/stationStore";
+import QueueInfoCard from "./QueueInfoCard";
 
 interface Props {
   stationId: string | null | undefined;
@@ -193,10 +194,6 @@ export default function FuelQueuePreview({ stationId, fuelType, quantity, date =
   const unit = data.unit;
   const current = data.currentServing;
   const you = data.you;
-  const reserved = you.basis === "reserved-slot";
-  const joined = new Date(you.joinAt).getTime() <= serverNow;
-  // Waiting in line now: counts down to the turn. A later slot: the wait after it starts.
-  const waitSeconds = reserved ? 0 : joined ? secondsUntil(you.estimatedStartAt) : you.estimatedWaitSeconds;
   const vehicleName = (v: string | null, kind: string) => v ?? (kind === "walkin" ? "Walk-in vehicle" : "Booked vehicle");
 
   const fact = (label: string, value: React.ReactNode, strong = false) => (
@@ -211,6 +208,9 @@ export default function FuelQueuePreview({ stationId, fuelType, quantity, date =
 
   return shell(
     <>
+      <div className="mb-3">
+        <QueueInfoCard info={you} />
+      </div>
       <dl className="cx-facts">
         {fact(
           "Currently serving",
@@ -218,7 +218,6 @@ export default function FuelQueuePreview({ stationId, fuelType, quantity, date =
             ? `${vehicleName(current.vehicle, current.kind)} · ${current.quantity ?? "?"} ${unit} · ${formatDuration(secondsUntil(current.endsAt))} left`
             : "Nozzle free",
         )}
-        {fact("Queue ahead", `${you.vehiclesAhead} vehicle${you.vehiclesAhead === 1 ? "" : "s"}`)}
         {data.schedule &&
           fact(
             "Places left in this slot",
@@ -227,16 +226,8 @@ export default function FuelQueuePreview({ stationId, fuelType, quantity, date =
               : "Full: join the waitlist",
             true,
           )}
-        {fact(
-          "Estimated wait",
-          reserved
-            ? "Slot reserved (no live queue for that day yet)"
-            : `${formatDuration(waitSeconds)}${!joined && waitSeconds > 0 ? " after your slot starts" : ""}`,
-          true,
-        )}
         {fact("Your quantity", `${you.quantity} ${unit}`)}
         {fact("Your service time", `~${formatDuration(you.serviceSeconds)}`)}
-        {fact("Estimated start", clock(you.estimatedStartAt), true)}
         {fact("Estimated complete", clock(you.estimatedCompleteAt))}
       </dl>
 

@@ -11,6 +11,7 @@
  *     payment.failed cannot undo a capture
  */
 
+const { payableOf } = require("./payMethod");
 const Booking = require("../../models/Booking");
 
 /** A booking that can still take a payment: create-order, verify and the webhook agree on this. */
@@ -31,7 +32,7 @@ async function recordCapturedPayment({ booking, orderId, paymentId, amountPaise,
   if (booking.paymentStatus === "paid") return { outcome: "already_paid", status: booking.status };
 
   if (amountPaise !== undefined) {
-    const expected = Math.round(Number(booking.amount) * 100);
+    const expected = Math.round(payableOf(booking) * 100);
     if (Number(amountPaise) !== expected) {
       console.warn(
         `[payment] AMOUNT MISMATCH (${source}): payment ${paymentId} captured ${amountPaise} paise ` +
@@ -50,7 +51,13 @@ async function recordCapturedPayment({ booking, orderId, paymentId, amountPaise,
     },
     { $set: { paymentStatus: "paid", razorpayPaymentId: paymentId }, $unset: { paymentFailureReason: 1 } },
   );
-  if (marked.modifiedCount) return { outcome: "paid", status: booking.status };
+  if (marked.modifiedCount) {
+    // An online capture against a booking that has already completed makes it
+    // revenue now, so the commission accrues here too (same once-only rule).
+    const fresh = await Booking.findById(booking._id).lean();
+    if (fresh) await require("../commission/commissionService").accrueForBooking(fresh);
+    return { outcome: "paid", status: booking.status };
+  }
 
   const now = await Booking.findById(booking._id).select("status paymentStatus").lean();
   if (now?.paymentStatus === "paid") return { outcome: "already_paid", status: now.status };
@@ -103,7 +110,16 @@ async function recordStationCollection({ bookingId, stationId = null, collectedB
     { $set: { paymentStatus: "paid", collectedBy, collectedAt: now, collectionMethod: method } },
     { returnDocument: "after" },
   );
-  if (booking) return { outcome: "collected", booking };
+  if (booking) {
+    // The money is in. If the fill had already finished, this is the moment
+    // the booking becomes revenue, so it is the moment FuelMart's commission
+    // on it accrues. A booking still being served accrues at completion
+    // instead; whichever comes second does it, and the unique index on the
+    // entry means exactly one of them succeeds
+    // (services/commission/commissionService.js).
+    await require("../commission/commissionService").accrueForBooking(booking);
+    return { outcome: "collected", booking };
+  }
 
   const current = await Booking.findOne(scope);
   if (!current) return { outcome: "not_found" };

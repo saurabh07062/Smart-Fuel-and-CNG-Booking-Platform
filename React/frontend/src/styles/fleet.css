@@ -1,0 +1,572 @@
+/* ============================================================
+   FUELMART FLEET BOOKING — several vehicles, one visit
+
+   Built on the customer app's own tokens (variables.css, re-pointed
+   by .cx-app in customer.css), so it wears the same red identity,
+   the same radii and the same dark mode as every other customer
+   page without repeating a single colour value.
+
+   The layout is a list of rows, not a table: a schedule of five
+   vehicles has to read on a 360px phone, where a table would either
+   scroll sideways or shrink to nothing.
+   ============================================================ */
+
+.fm-fleet {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 900px;
+}
+
+/* ---------- steps ---------- */
+
+.fm-fleet-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fm-fleet-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.fm-fleet-step.is-current {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+.fm-fleet-step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg2);
+  font-size: 11px;
+  font-weight: 800;
+}
+.fm-fleet-step.is-current .fm-fleet-step-n {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ---------- cards ---------- */
+
+.fm-fleet-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+}
+.fm-fleet-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+}
+.fm-fleet-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.fm-fleet-hint {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.fm-fleet-summary {
+  margin: 0 0 14px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text2);
+}
+.fm-fleet-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--status-bad-bg);
+  border: 1px solid var(--status-bad);
+  color: var(--status-bad);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/* ---------- fields ---------- */
+
+.fm-fleet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+.fm-fleet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.fm-fleet-field > span {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.fm-fleet-field select,
+.fm-fleet-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+.fm-fleet-field select:focus,
+.fm-fleet-field input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+.fm-fleet-field-sm {
+  max-width: 150px;
+}
+
+.fm-fleet-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+/* ---------- the garage ---------- */
+
+.fm-fleet-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fm-fleet-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+  text-align: left;
+}
+.fm-fleet-pick span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.fm-fleet-pick strong {
+  font-size: 12.8px;
+  color: var(--text);
+}
+.fm-fleet-pick small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.fm-fleet-pick:hover {
+  border-color: var(--primary);
+}
+.fm-fleet-pick.is-added {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.fm-fleet-pick:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---------- rows ---------- */
+
+.fm-fleet-list,
+.fm-fleet-schedule {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fm-fleet-row,
+.fm-fleet-slot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg2);
+}
+.fm-fleet-slot.is-problem {
+  border-color: var(--status-warn);
+  background: var(--status-warn-bg);
+}
+.fm-fleet-row-main,
+.fm-fleet-slot-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  flex: 1;
+  line-height: 1.3;
+}
+.fm-fleet-row-main strong,
+.fm-fleet-slot-main strong {
+  font-size: 13.5px;
+  color: var(--text);
+  font-family: var(--cx-mono, ui-monospace, monospace);
+  letter-spacing: 0.02em;
+}
+.fm-fleet-row-main small,
+.fm-fleet-slot-main small,
+.fm-fleet-slot-time small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.fm-fleet-row-amount {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+.fm-fleet-slot-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.fm-fleet-slot-time {
+  display: flex;
+  flex-direction: column;
+  min-width: 108px;
+  line-height: 1.3;
+}
+.fm-fleet-slot-time strong {
+  font-size: 13.5px;
+  color: var(--text);
+}
+.fm-fleet-slot-none {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 320px;
+  line-height: 1.5;
+}
+.fm-fleet-qty input {
+  width: 74px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.fm-fleet-slot-edit select {
+  padding: 7px 9px;
+  border: 1px solid var(--primary);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* The PIN each vehicle checks in with. Monospace, because it is read aloud. */
+.fm-fleet-pin {
+  font-family: var(--cx-mono, ui-monospace, monospace);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  padding: 4px 10px;
+}
+
+/* ---------- status chips ---------- */
+
+.fm-fleet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.fm-fleet-chip-good {
+  background: var(--status-good-bg);
+  color: var(--status-good);
+}
+.fm-fleet-chip-warn {
+  background: var(--status-warn-bg);
+  color: var(--status-warn);
+}
+.fm-fleet-chip-bad {
+  background: var(--status-bad-bg);
+  color: var(--status-bad);
+}
+.fm-fleet-chip-mute {
+  background: var(--bg2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+/* ---------- totals and actions ---------- */
+
+.fm-fleet-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.fm-fleet-totals > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.fm-fleet-total-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.fm-fleet-totals strong {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.fm-fleet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.fm-fleet-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fm-fleet-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.fm-fleet-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.fm-fleet-btn-primary:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.06);
+}
+.fm-fleet-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.fm-fleet-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.fm-fleet-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fm-fleet-icon-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.fm-fleet-misses {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+.fm-fleet-misses h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+@media (max-width: 640px) {
+  .fm-fleet-card {
+    padding: 14px;
+  }
+  /* The schedule row stacks rather than squeezing four columns into 360px. */
+  .fm-fleet-slot,
+  .fm-fleet-row {
+    align-items: flex-start;
+  }
+  .fm-fleet-slot-time {
+    min-width: 0;
+  }
+  .fm-fleet-field-sm {
+    max-width: none;
+  }
+}
+
+/* ---------- the group's one code ---------- */
+
+/* Shown once, above the vehicles: it belongs to the booking, not to any one
+   van (backend services/booking/fleetBooking.js gives every member the same
+   code, and one entry checks the whole group in). */
+.fm-fleet-grouppin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin: 14px 0 4px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--primary-light);
+  border: 1px dashed var(--primary);
+}
+.fm-fleet-grouppin > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fm-fleet-grouppin code {
+  font-family: var(--cx-mono, ui-monospace, monospace);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  line-height: 1.1;
+  color: var(--primary);
+}
+.fm-fleet-grouppin p {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+  font-size: 12.3px;
+  line-height: 1.55;
+  color: var(--text2);
+}
+
+/* The unit beside a per-vehicle quantity box, so "12" reads as 12 L. */
+.fm-fleet-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fm-fleet-qty-unit {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* The line under a total that says what it is measured against. */
+.fm-fleet-total-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/*
+  The station, when it came from the page the customer was already on.
+
+  It takes the slot the chooser had in the same grid, so the row still reads
+  Station / Fuel / Date / Preferred start -- it simply states the station
+  instead of asking for it (pages/customer/FleetBooking.tsx).
+*/
+.fm-fleet-station {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fm-fleet-station-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.fm-fleet-station-sub {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fm-fleet-station-change {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}

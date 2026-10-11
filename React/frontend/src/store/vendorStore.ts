@@ -18,6 +18,8 @@ export type VendorTab =
   | "bookings"
   | "inventory"
   | "revenue"
+  | "commission"
+  | "insights"
   | "employees"
   | "customers"
   | "reports"

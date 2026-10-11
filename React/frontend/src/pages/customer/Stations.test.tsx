@@ -34,6 +34,7 @@ const inRouter = (ui: React.ReactNode) =>
         <Route path="/stations" element={ui} />
         <Route path="/nearest-pump" element={<p>Nearest page</p>} />
         <Route path="/booking" element={<p>Booking page</p>} />
+        <Route path="/fleet-booking" element={<p>Fleet page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -53,11 +54,38 @@ describe("Station card", () => {
     expect(screen.getByRole("button", { name: /Try nearby/ })).toBeTruthy();
   });
 
-  it("an open, stocked station books, with the price per litre", () => {
+  it("Book Now asks whether it is one vehicle or several", () => {
     inRouter(<StationCard station={station({ fuelAvailability: { petrol: true, diesel: true, cng: true } })} />);
     expect(screen.getByText("₹100.00/L")).toBeTruthy();
+
     fireEvent.click(screen.getByRole("button", { name: /Book Now/ }));
+    // The question first, naming the station, and neither page yet.
+    expect(screen.getByText("Are you booking fuel for multiple vehicles?")).toBeTruthy();
+    expect(screen.queryByText("Booking page")).toBeNull();
+    expect(screen.queryByText("Fleet page")).toBeNull();
+  });
+
+  it("'No, single vehicle' goes to the booking flow that always existed", () => {
+    inRouter(<StationCard station={station({ fuelAvailability: { petrol: true, diesel: true, cng: true } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Book Now/ }));
+    fireEvent.click(screen.getByTestId("choose-single"));
     expect(screen.getByText("Booking page")).toBeTruthy();
+  });
+
+  it("'Yes, fleet booking' goes to the fleet screen", () => {
+    inRouter(<StationCard station={station({ fuelAvailability: { petrol: true, diesel: true, cng: true } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Book Now/ }));
+    fireEvent.click(screen.getByTestId("choose-fleet"));
+    expect(screen.getByText("Fleet page")).toBeTruthy();
+  });
+
+  it("the question can be dismissed without booking anything", () => {
+    inRouter(<StationCard station={station({ fuelAvailability: { petrol: true, diesel: true, cng: true } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Book Now/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("booking-mode-sheet")).toBeNull();
+    expect(screen.queryByText("Booking page")).toBeNull();
+    expect(screen.queryByText("Fleet page")).toBeNull();
   });
 });
 

@@ -242,6 +242,58 @@ function wrap(mw, category) {
   };
 }
 
+// ------------------------------------------------------- picture rules
+
+/**
+ * Enforce what the picture itself must be (services/upload/imageRules.js),
+ * after Multer has accepted its type and size.
+ *
+ * Runs as its own middleware rather than inside fileFilter because the
+ * dimensions live in the file, and fileFilter is called before a byte of it
+ * has been written. A rejected upload is deleted here and reported as a 400,
+ * so nothing unusable ever reaches the database.
+ */
+function enforceImageRules(rules) {
+  const { checkImage, STATION_IMAGE_RULES } = require("../services/upload/imageRules");
+  const applied = rules || STATION_IMAGE_RULES;
+
+  return function (req, res, next) {
+    const files = [];
+    if (req.file) files.push(req.file);
+    if (Array.isArray(req.files)) files.push(...req.files);
+    else if (req.files && typeof req.files === "object") {
+      for (const list of Object.values(req.files)) files.push(...(list || []));
+    }
+    if (files.length === 0) return next();
+
+    for (const file of files) {
+      const reason = checkImage(file.path, applied);
+      if (!reason) continue;
+
+      // One bad photo rejects the request: a half-applied upload would leave
+      // the vendor guessing which of their files was kept.
+      for (const f of files) {
+        try {
+          fs.unlinkSync(f.path);
+        } catch {
+          /* already gone */
+        }
+      }
+      return res.status(400).json({
+        msg: `${file.originalname ? `"${file.originalname}": ` : ""}${reason}`,
+        code: "IMAGE_RULES",
+        rules: {
+          minWidth: applied.minWidth,
+          minHeight: applied.minHeight,
+          minRatio: applied.minRatio,
+          maxRatio: applied.maxRatio,
+        },
+      });
+    }
+    return next();
+  };
+}
+
 // ------------------------------------------------------------- file helpers
 
 /**
@@ -285,6 +337,7 @@ function removeUploadedFile(publicPathValue) {
 }
 
 module.exports = {
+  enforceImageRules,
   uploadImage,
   uploadImages,
   uploadFields,

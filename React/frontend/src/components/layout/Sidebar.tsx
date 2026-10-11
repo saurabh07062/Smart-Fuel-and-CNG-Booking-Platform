@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { useBookingStore } from "@/store/bookingStore";
 import { isSlotElapsed } from "@/utils/format";
@@ -9,6 +9,10 @@ const MAIN = [
   { to: "/dashboard", icon: "fa-chart-simple", label: "Dashboard", end: true },
   { to: "/stations", icon: "fa-map-location-dot", label: "Find Stations", end: false },
   { to: "/booking", icon: "fa-gas-pump", label: "Book Fuel", end: false },
+  // Several vehicles in one visit. A separate entry rather than a mode inside
+  // Book Fuel: the two flows ask for different things, and mixing them would
+  // put a vehicle list in front of the customer who wants one slot.
+  { to: "/fleet-booking", icon: "fa-truck-fast", label: "Fleet Booking", end: false },
 ];
 
 const navClass = ({ isActive }: { isActive: boolean }) => `cx-nav-item ${isActive ? "active" : ""}`;
@@ -86,6 +90,9 @@ export default function Sidebar() {
       </nav>
 
       <div className="cx-sidebar-foot">
+        <Link to="/privacy" className="pp-link" style={{ display: "block", padding: "6px 14px" }}>
+          Privacy Policy
+        </Link>
         <button type="button" className="cx-nav-item is-danger" onClick={handleLogout}>
           <i className="fas fa-right-from-bracket" aria-hidden />
           <span>Logout</span>

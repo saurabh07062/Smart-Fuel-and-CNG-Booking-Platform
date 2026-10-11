@@ -237,6 +237,8 @@ test("booking concurrency against MongoDB", async (t) => {
 
     await t.test("vendor status change: conflict is a 409, a repeat click is a no-op", async () => {
       const b = await makeBooking(customers[5]);
+      // Fuelling can only start once the customer has checked in at the pump.
+      await require("./helpers/arriveAtPump").arriveAtPump(b._id);
       const req = (status) => ({
         params: { stationId: String(stationA._id), bookingId: String(b._id) },
         body: { status },

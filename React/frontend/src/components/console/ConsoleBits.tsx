@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Loader from "@/components/common/Loader";
 import { vendorStatusVisual } from "@/utils/consoleFormat";
 
 /**
@@ -65,13 +66,12 @@ export function ConsoleEmpty({
 }
 
 /** The spinner every console tab shows while its own fetch is in flight. */
-export function ConsoleLoading({ label = "Loading..." }: { label?: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-[60vh]">
-      <i className="fas fa-spinner fa-spin text-4xl vm-accent-text mb-4" aria-hidden />
-      <p className="vm-text-muted">{label}</p>
-    </div>
-  );
+export function ConsoleLoading({ label = "Loading…" }: { label?: string }) {
+  // A second spinner with its own markup was the console's copy of the one in
+  // components/common/Loader.tsx -- same shape, different size, and no
+  // role="status", so a screen reader was told nothing was happening. Eight
+  // console screens now draw the shared one.
+  return <Loader full label={label} />;
 }
 
 /** The console's error state, with the retry the original offered. */

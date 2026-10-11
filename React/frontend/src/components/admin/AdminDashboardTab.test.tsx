@@ -1,8 +1,23 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { useAdminStore } from "@/store/adminStore";
 import type { SuperAdminDashboard } from "@/services/api/adminApi";
 import AdminDashboardTab from "./AdminDashboardTab";
+
+// The vendors panel fetches on mount; the dashboard's own figures are the subject here.
+vi.mock("@/services/api/adminApi", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchManagedVendors: vi.fn(async () => []),
+}));
+
+/** The tab lives inside the admin router in the app. */
+const show = (tab: "dashboard" | "inventory" = "dashboard") =>
+  render(
+    <MemoryRouter>
+      <AdminDashboardTab tab={tab} />
+    </MemoryRouter>,
+  );
 
 const zero = { revenue: 0, fuelValue: 0, fees: 0, quantity: 0, transactions: 0 };
 const base: SuperAdminDashboard = {
@@ -34,13 +49,20 @@ beforeEach(() => {
 describe("Admin dashboard shows only real figures", () => {
   it("with no transactions it reads ₹0, not the old placeholder numbers", () => {
     useAdminStore.setState({ dashboard: base });
-    render(<AdminDashboardTab tab="dashboard" />);
+    show();
 
+    // Income is masked until the eye is tapped (store/moneyStore.ts).
+    expect(screen.getByTestId("tile-revenue-today").textContent).toContain("₹ ••••••");
+    fireEvent.click(screen.getByRole("button", { name: "Show today's revenue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show awaiting collection" }));
     expect(screen.getByTestId("tile-revenue-today").textContent).toContain("₹0.00");
     expect(screen.getByTestId("tile-revenue-today").textContent).toContain("0 paid transactions");
     expect(screen.getByTestId("tile-awaiting").textContent).toContain("₹0.00");
     expect(screen.getByTestId("tile-wait").textContent).toContain("—");
-    expect(screen.getByTestId("by-hour-empty")).toBeTruthy();
+    // The by-hour panel is gone: today's bookings are the tile above, and the
+    // hour-by-hour breakdown lived on a dashboard that had no room for it.
+    expect(screen.queryByTestId("by-hour-empty")).toBeNull();
+    expect(screen.queryByTestId("by-hour")).toBeNull();
 
     const text = document.body.textContent || "";
     for (const fake of ["₹1.4L", "+12% vs last week", "4 mins", "4,500L", "2,100L", "6,500L", "8,900L", "4 PM (Peak)", "Auto-Refill"]) {
@@ -65,24 +87,31 @@ describe("Admin dashboard shows only real figures", () => {
         },
       },
     });
-    render(<AdminDashboardTab tab="dashboard" />);
+    show();
 
+    fireEvent.click(screen.getByRole("button", { name: "Show today's revenue" }));
+    // Showing one amount must not reveal another.
+    expect(screen.getByTestId("tile-awaiting").textContent).toContain("₹ ••••••");
+    fireEvent.click(screen.getByRole("button", { name: "Show awaiting collection" }));
     expect(screen.getByTestId("tile-revenue-today").textContent).toContain("₹530.50");
     expect(screen.getByTestId("tile-revenue-today").textContent).toContain("2 paid transactions");
     expect(screen.getByTestId("tile-bookings-today").textContent).toContain("4");
     expect(screen.getByTestId("tile-awaiting").textContent).toContain("₹213.00");
     expect(screen.getByTestId("tile-wait").textContent).toContain("3.5 min");
-    expect(screen.getByTestId("by-hour").textContent).toContain("11 AM");
     expect(screen.getByTestId("inventory-panel").textContent).toContain("4,998 L / 10,000 L");
     expect(screen.getByTestId("inventory-panel").textContent).toContain("capacity not recorded");
   });
 
   it("shows a loading state, then an error with a retry when the server fails", () => {
-    const { rerender } = render(<AdminDashboardTab tab="dashboard" />);
+    const { rerender } = show();
     expect(document.body.textContent).toContain("Loading dashboard");
 
     useAdminStore.setState({ dashboardError: "Could not load the dashboard from the server." });
-    rerender(<AdminDashboardTab tab="dashboard" />);
+    rerender(
+      <MemoryRouter>
+        <AdminDashboardTab tab="dashboard" />
+      </MemoryRouter>,
+    );
     expect(screen.getByRole("alert").textContent).toContain("Could not load the dashboard");
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });

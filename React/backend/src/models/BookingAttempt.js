@@ -16,7 +16,7 @@ const BookingAttemptSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     station: { type: mongoose.Schema.Types.ObjectId, ref: "Station", default: null },
-    bookingDate: { type: String, default: null },
+    bookingDate: { type: String, default: null, trim: true },
     timeSlot: { type: String, default: null },
     fuelType: { type: String, default: null },
     outcome: {

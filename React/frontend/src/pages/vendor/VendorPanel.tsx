@@ -5,6 +5,9 @@ import StationsTab from "@/components/vendor/tabs/StationsTab";
 import BookingsTab from "@/components/vendor/tabs/BookingsTab";
 import InventoryTab from "@/components/vendor/tabs/InventoryTab";
 import RevenueTab from "@/components/vendor/tabs/RevenueTab";
+import CommissionTab from "@/components/vendor/tabs/CommissionTab";
+import AdminDistributionsTab from "@/components/admin/AdminDistributionsTab";
+import { fetchVendorDistributions } from "@/services/api/vendorApi";
 import EmployeesTab from "@/components/vendor/tabs/EmployeesTab";
 import ReportsTab from "@/components/vendor/tabs/ReportsTab";
 import ProfileTab from "@/components/vendor/tabs/ProfileTab";
@@ -14,6 +17,8 @@ import { useResync, useSocketEvent } from "@/hooks/useSocket";
 import { SOCKET_EVENTS } from "@/services/socket/socketEvents";
 import { coalesce } from "@/utils/coalesce";
 import { fetchVendorStations } from "@/services/api/vendorApi";
+import ChatWidget from "@/components/chat/ChatWidget";
+import { useChatRealtime } from "@/hooks/useChatRealtime";
 
 /**
  * The vendor console -- port of renderVendorPanel() and its ten tabs.
@@ -29,6 +34,9 @@ export default function VendorPanel() {
   const loading = useVendorStore((s) => s.loading);
   const error = useVendorStore((s) => s.error);
   const loadTab = useVendorStore((s) => s.loadTab);
+  // An admin's reply reaches the vendor while they work, not only when they
+  // happen to open the widget.
+  useChatRealtime();
 
   // First paint loads the tab the console opens on. A vendor with no station
   // yet (just approved) is taken to Stations, where the Add form opens.
@@ -104,6 +112,17 @@ export default function VendorPanel() {
         return <InventoryTab />;
       case "revenue":
         return <RevenueTab />;
+      case "commission":
+        return <CommissionTab />;
+      // The same screen the admin console uses, pointed at this vendor's own
+      // stations rather than every station.
+      case "insights":
+        return (
+          <AdminDistributionsTab
+            load={fetchVendorDistributions}
+            scopeNote="What the averages hide, across your stations."
+          />
+        );
       case "employees":
         return <EmployeesTab />;
       case "customers":
@@ -117,5 +136,18 @@ export default function VendorPanel() {
     }
   };
 
-  return <VendorShell>{body()}</VendorShell>;
+  return (
+    <>
+      <VendorShell>{body()}</VendorShell>
+      {/*
+        The station-aware assistant and vendor support, on every tab. The same
+        widget the customer app uses: the server sends a VENDOR context (their
+        own stations, bookings, queue and stock), and `fm-chat-console` gives it
+        the console's colour instead of customer blue.
+      */}
+      <div className="fm-chat-console">
+        <ChatWidget />
+      </div>
+    </>
+  );
 }

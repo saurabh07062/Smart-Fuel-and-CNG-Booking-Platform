@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useBookingMode } from "@/hooks/useBookingMode";
 import type { UiStation } from "@/types";
 import Layout from "@/components/layout/Layout";
+import ZoomableImage from "@/components/common/ZoomableImage";
 import Loader from "@/components/common/Loader";
 import ErrorMessage from "@/components/common/ErrorMessage";
 import StationsMap from "@/components/maps/StationsMap";
@@ -41,6 +43,7 @@ const FUEL_TONE: Record<string, string> = { CNG: "cx-tone-green", Diesel: "cx-to
 export default function StationDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const { ask, sheet } = useBookingMode();
   const fromStore = useStationStore((s) => s.stations.find((x) => x.id === id));
   const [fetched, setFetched] = useState<UiStation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,11 +99,17 @@ export default function StationDetail() {
   const token = level === "low" ? "good" : level === "medium" ? "warn" : "bad";
   const directions = directionsUrl(s.lat, s.lng);
   const book = (fuel?: string) =>
-    navigate(`/booking?stationId=${s.id}${fuel ? `&fuelType=${encodeURIComponent(fuel)}` : ""}`);
+    ask({
+      stationId: s.id,
+      stationName: s.name,
+      singleQuery: fuel ? `fuelType=${encodeURIComponent(fuel)}` : "",
+      fuelType: fuel ?? null,
+    });
   const amenities = s.amenities ?? [];
 
   return (
     <Layout>
+      {sheet}
       <button type="button" className="cx-back" onClick={() => navigate("/stations")}>
         <i className="fas fa-arrow-left" aria-hidden /> Back to stations
       </button>
@@ -112,13 +121,22 @@ export default function StationDetail() {
         />
         <div className="cx-panel-body flex flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-4 min-w-0">
+            {/* The station's own photo, the same one the cover uses. The
+                tile used to be a fixed pump icon, so a vendor who had
+                uploaded a photo still saw the placeholder here. */}
             <div
               className={`cx-thumb ${s.open ? "" : "is-closed"}`}
-              style={{ width: 72, height: 72, marginTop: 0, border: "4px solid var(--card)", background: "var(--card)" }}
+              style={{ width: 72, height: 72, marginTop: 0, border: "4px solid var(--card)", background: "var(--card)", overflow: "hidden" }}
             >
-              <span className="cx-stat-icon cx-tone-blue" style={{ width: "100%", height: "100%", borderRadius: 8, fontSize: 22 }}>
-                <i className="fas fa-gas-pump" aria-hidden />
-              </span>
+              {s.image ? (
+                /* 72px is enough to recognise a forecourt and not enough to
+                   judge it, so the photo opens full size on a tap. */
+                <ZoomableImage src={s.image} caption={s.name} testId="station-photo" />
+              ) : (
+                <span className="cx-stat-icon cx-tone-blue" style={{ width: "100%", height: "100%", borderRadius: 8, fontSize: 22 }}>
+                  <i className="fas fa-gas-pump" aria-hidden />
+                </span>
+              )}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">

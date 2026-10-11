@@ -36,6 +36,8 @@ const InventoryMovementSchema = new mongoose.Schema(
 );
 
 InventoryMovementSchema.index({ station: 1, createdAt: -1 });
+// Sales of one fuel in a period, for the stock and sales figures.
+InventoryMovementSchema.index({ station: 1, type: 1, createdAt: -1 });
 InventoryMovementSchema.index({ station: 1, fuel: 1, createdAt: -1 });
 // A booking's sale is recorded once.
 InventoryMovementSchema.index({ booking: 1, type: 1 }, { unique: true, partialFilterExpression: { type: "sale" } });

@@ -1,0 +1,1 @@
+import{D as e}from"./index-3cnJ6k2C.js";function s(r,i){const o=typeof r=="string"?Number(r):r,t=typeof i=="string"?Number(i):i;return e(o,t)?`https://www.google.com/maps/dir/?api=1&destination=${o},${t}&travelmode=driving`:null}export{s as d};

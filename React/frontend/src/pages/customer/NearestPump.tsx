@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { canonicalFuel } from "@/utils/vendorFuels";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/layout/Layout";
 import EmptyState from "@/components/common/EmptyState";
@@ -59,7 +60,8 @@ export default function NearestPump() {
   if (!result) return null;
 
   const { fuelType } = result;
-  const fuelLabel = fuelType.charAt(0).toUpperCase() + fuelType.slice(1).toLowerCase();
+  // "CNG", not "Cng": the same canonical label the prices are keyed by.
+  const fuelLabel = canonicalFuel(fuelType) ?? fuelType;
   const nearest = stations[0];
   const others = stations.slice(1);
 

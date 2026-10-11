@@ -45,6 +45,15 @@ export default function StationsTab() {
   const [locating, setLocating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const editing = editingId ? stations.find((s) => String(s._id) === editingId) : undefined;
+  /**
+   * Photos, opened from the card's own button.
+   *
+   * The editor was only reachable by pressing Edit Station and scrolling past
+   * the whole details form, so "there is no option to add an image" was a fair
+   * description of it. This is the same editor, one click from the station.
+   */
+  const [photosId, setPhotosId] = useState<string | null>(null);
+  const photoStation = photosId ? stations.find((s) => String(s._id) === photosId) : undefined;
 
   const set = (k: keyof typeof EMPTY_FORM, v: string) => setForm((f) => ({ ...f, [k]: v }));
   /** A pasted Google Maps pair ("18.580563, 73.975342") fills both boxes from the same spot. */
@@ -305,6 +314,15 @@ export default function StationsTab() {
         </div>
       )}
 
+      {photoStation && !editing && (
+        <StationImagesEditor
+          key={`photos-only-${photosId}`}
+          station={photoStation}
+          onClose={() => setPhotosId(null)}
+          onSaved={loadStations}
+        />
+      )}
+
       {editing && (
         <>
           <StationDetailsEditor
@@ -344,6 +362,10 @@ export default function StationsTab() {
               onToggle={() => void toggleStatus(String(s._id))}
               onDelete={() => void remove(String(s._id))}
               onEdit={() => setEditingId(String(s._id))}
+              onPhotos={() => {
+                setEditingId(null); // one station screen at a time
+                setPhotosId(String(s._id));
+              }}
             />
           ))}
         </div>
@@ -370,6 +392,7 @@ function StationCard({
   onToggle,
   onDelete,
   onEdit,
+  onPhotos,
 }: {
   station: VendorStation;
   onBookings: () => void;
@@ -377,6 +400,7 @@ function StationCard({
   onToggle: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onPhotos: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
   const pumpPhotos = (
@@ -394,8 +418,8 @@ function StationCard({
   const prices = (s.prices ?? {}) as Record<string, number | undefined>;
 
   return (
-    <div className="vm-bg-surface rounded-2xl border vm-border p-6 vm-hover-border transition-colors">
-      <div className="flex items-start justify-between mb-4">
+    <div className="vm-bg-surface rounded-2xl border vm-border p-5 vm-hover-border transition-colors">
+      <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
           {photo && !imgFailed ? (
             <img
@@ -424,12 +448,12 @@ function StationCard({
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-        {/* Only the fuels this station sells. */}
+      {/* One price card per fuel sold; they share the row evenly at any width. */}
+      <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))" }}>
         {soldFuels(s.fuelTypes).map((f) => (
-          <div key={f} className="vm-bg-ground p-3 rounded-lg border vm-border">
-            <p className="text-[10px] vm-text-muted uppercase">{f}</p>
-            <p className="font-bold text-sm">₹{prices[f] ?? "N/A"}</p>
+          <div key={f} className="vm-bg-ground px-3 py-2 rounded-lg border vm-border">
+            <p className="text-[10px] vm-text-muted uppercase tracking-wide">{f}</p>
+            <p className="font-bold text-[15px] leading-tight">₹{prices[f] ?? "N/A"}</p>
           </div>
         ))}
       </div>
@@ -437,14 +461,14 @@ function StationCard({
       <NozzleModes station={s} />
       <SlotTimings station={s} />
 
-      <div className="flex items-center gap-2 text-xs vm-text-muted mb-4">
+      <div className="flex items-center gap-2 text-xs vm-text-muted mb-3">
         <span>{s.fuelTypes?.join(", ") || "No fuels listed"}</span>
         <span>•</span>
         <span>{s.openingHours || "24 Hours"}</span>
       </div>
 
       {pumpPhotos.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-2 gap-2 mb-3">
           {pumpPhotos.map(([label, url]) => (
             <figure key={label} className="m-0">
               <img
@@ -477,6 +501,15 @@ function StationCard({
           className="flex-1 vm-bg-ground vm-hover border vm-border rounded-lg py-2 text-xs font-bold transition-colors"
         >
           <i className="fas fa-history mr-1" aria-hidden /> Prices
+        </button>
+        {/* Says whether this station HAS a photo yet, so a station without one
+            is visible at a glance rather than only after opening the editor. */}
+        <button
+          onClick={onPhotos}
+          className="flex-1 vm-bg-ground vm-hover border vm-border rounded-lg py-2 text-xs font-bold transition-colors"
+        >
+          <i className={`fas ${photo ? "fa-images" : "fa-camera"} mr-1`} aria-hidden />{" "}
+          {photo ? "Photos" : "Add Photo"}
         </button>
         <button
           onClick={onToggle}

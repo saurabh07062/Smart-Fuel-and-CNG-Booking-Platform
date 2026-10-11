@@ -11,6 +11,66 @@ const router = express.Router();
 const Station = require("../models/Station");
 const discovery = require("../services/station/discovery");
 const { predictWait, mmcWaitMinutes, etaForPosition } = require("../services/algorithms/queue");
+const { reverseGeocode } = require("../services/station/reverseGeocode");
+const { searchPlaces } = require("../services/station/placeSearch");
+const { rateLimit } = require("../services/security/rateLimiter");
+
+/**
+ * GET /api/v1/discovery/place?lat=&lng=
+ *
+ * What to call a point: "Wagholi, Pune" instead of "18.5721, 73.9842".
+ * Public, like the rest of discovery -- a visitor sees where the search is
+ * being made from before they have an account.
+ *
+ * Never an error the caller has to handle: when the name cannot be resolved
+ * the response is 200 with name: null, and the app shows the coordinates.
+ */
+router.get("/place", async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return res.status(400).json({ msg: "lat and lng query parameters are required and must be coordinates" });
+  }
+  const { name, cached } = await reverseGeocode(lat, lng);
+  // A place name is stable; let the browser keep it for the session.
+  res.set("Cache-Control", "private, max-age=3600");
+  return res.json({ name, cached });
+});
+
+/**
+ * GET /api/v1/discovery/search-place?q=
+ *
+ * Type a place, get coordinates: the way a customer sets their location when
+ * the device will not or may not give a fix (permission refused, no signal
+ * indoors). The map is still there; this is the faster answer on a phone.
+ *
+ * Public, like the rest of discovery, and rate-limited per IP because it
+ * reaches a free external service on our behalf
+ * (services/station/placeSearch.js keeps to that service's usage policy).
+ *
+ * Never an error the caller has to handle: a query that matches nothing and a
+ * lookup that failed both answer 200 with an empty list, because the customer
+ * does the same thing in either case -- try different words, or tap the map.
+ */
+router.get(
+  "/search-place",
+  rateLimit({
+    limit: Number(process.env.PLACE_SEARCH_PER_MINUTE) || 30,
+    windowMs: 60_000,
+    keyPrefix: "place-search",
+    keyFn: (req) => req.ip,
+  }),
+  async (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q.slice(0, 120) : "";
+    if (q.trim().length < 3) {
+      return res.json({ results: [], msg: "Type at least three characters." });
+    }
+    const { results, cached } = await searchPlaces(q);
+    // Stable enough for a browser to keep while the customer is typing.
+    res.set("Cache-Control", "private, max-age=600");
+    return res.json({ results, cached });
+  },
+);
 
 /**
  * GET /api/v1/discovery/nearby?lat=&lng=&radiusKm=&fuelType=&limit=&minQuantity=

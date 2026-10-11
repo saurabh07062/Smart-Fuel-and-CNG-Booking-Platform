@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const vendorPanelController = require("../controllers/vendorPanelController");
-const { uploadImage, uploadImages, uploadFields } = require("../middleware/upload");
+const { uploadImage, uploadImages, uploadFields, enforceImageRules } = require("../middleware/upload");
 const vendorAuth = require("../middleware/vendor");
 
 // ============================================================
@@ -20,12 +20,14 @@ router.post(
   "/stations",
   vendorAuth,
   uploadImages("stations", "stationImages", 5),
+  enforceImageRules(),
   vendorPanelController.createStation,
 );
 router.put(
   "/stations/:id",
   vendorAuth,
   uploadImages("stations", "stationImages", 5),
+  enforceImageRules(),
   vendorPanelController.updateStation,
 );
 // Petrol and CNG pump photos (Station.pumpImages). Multer fields "petrolImage"
@@ -37,6 +39,7 @@ router.put(
     { name: "petrolImage", maxCount: 1 },
     { name: "cngImage", maxCount: 1 },
   ]),
+  enforceImageRules(),
   vendorPanelController.updatePumpImages,
 );
 router.delete("/stations/:id", vendorAuth, vendorPanelController.deleteStation);
@@ -56,6 +59,8 @@ router.get("/stations/:id/price-history", vendorAuth, vendorPanelController.getP
 // DEMAND FORECAST & REORDER PLANNING
 // ============================================================
 router.get("/stations/:id/forecast", vendorAuth, vendorPanelController.getForecast);
+// The distributions, across every station this vendor owns.
+router.get("/distributions", vendorAuth, vendorPanelController.getDistributions);
 
 // ============================================================
 // QUEUE MANAGEMENT
@@ -81,6 +86,8 @@ router.patch("/stations/:stationId/bookings/:bookingId/collect", vendorAuth, ven
 // ============================================================
 router.put("/stations/:id/inventory", vendorAuth, vendorPanelController.updateInventory);
 router.get("/stations/:id/inventory/movements", vendorAuth, vendorPanelController.getInventoryMovements);
+// Clear one fuel's stock, tank capacity and stock history at a station.
+router.delete("/stations/:id/inventory/:fuel", vendorAuth, vendorPanelController.resetInventory);
 router.get("/inventory/alerts", vendorAuth, vendorPanelController.getInventoryAlerts);
 
 // ============================================================
@@ -92,8 +99,22 @@ router.get("/revenue", vendorAuth, vendorPanelController.getRevenue);
 // EMPLOYEES
 // ============================================================
 router.get("/employees", vendorAuth, vendorPanelController.getEmployees);
-router.post("/employees", vendorAuth, vendorPanelController.addEmployee);
-router.put("/employees/:id", vendorAuth, vendorPanelController.updateEmployee);
+// Multipart so a photo can come with the record, exactly as a customer's
+// vehicle does (routes/customerRoutes.js). The upload middleware sits after
+// vendorAuth so a file is only ever written for an authenticated request, and
+// a request with no file behaves exactly as it did before.
+router.post(
+  "/employees",
+  vendorAuth,
+  uploadImage("profiles", "employeePhoto"),
+  vendorPanelController.addEmployee,
+);
+router.put(
+  "/employees/:id",
+  vendorAuth,
+  uploadImage("profiles", "employeePhoto"),
+  vendorPanelController.updateEmployee,
+);
 router.delete("/employees/:id", vendorAuth, vendorPanelController.deleteEmployee);
 
 // ============================================================

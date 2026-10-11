@@ -120,21 +120,31 @@ export function useRealtimeSync() {
       if (!id || notified.current.has(id)) return;
       notified.current.add(id);
 
-      const fuelType = booking.fuelType || "Fuel";
-      const isCng = String(fuelType).toLowerCase() === "cng";
-      const message = isCng
-        ? "Your 5-minute CNG service has been completed."
-        : `Your ${fuelType} booking has been completed.`;
-
-      addNotification({
-        id: `completion-${id}`,
-        type: "booking",
-        title: isCng ? "CNG Booking Completed" : "Booking Completed",
-        message,
-        time: "Just now",
-        read: false,
-      });
-      pushToast(message, "success");
+      /**
+       * Fetch the notification the SERVER wrote for this completion, rather
+       * than inventing one here.
+       *
+       * This used to build its own row -- a hardcoded title and message, under
+       * a client-made id (`completion-<bookingId>`). Three things were wrong
+       * with it, and all three were visible to the customer:
+       *
+       *   - the backend already writes a real `booking_completed` notification
+       *     when the fill finishes (services/queue/serviceTimer.js), so the
+       *     panel showed the same completion twice, in two different wordings
+       *   - its id was not a notification id, so "mark all read" could never
+       *     record it as read on the server -- it came back unread, again and
+       *     again, which is the repeating message
+       *   - the text was written in this file, so it could disagree with the
+       *     booking (it said "5-minute CNG service" whatever the real fill
+       *     time was) and could not be changed without a release
+       *
+       * The socket normally delivers that real row as `notification:created`
+       * and the handler below adds it. This path exists for when the socket is
+       * down and the countdown's own poll noticed the completion first, so it
+       * pulls the list over HTTP: the same rows, from the database, with their
+       * real ids and read state.
+       */
+      void loadNotifications();
     };
 
     const isOperator = () => {

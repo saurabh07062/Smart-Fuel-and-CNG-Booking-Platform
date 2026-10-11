@@ -11,7 +11,7 @@
         android:pathData="M38,32 h22 a4,4 0 0 1 4,4 v42 h-30 v-42 a4,4 0 0 1 4,-4 z" />
     <!-- display window -->
     <path
-        android:fillColor="#E23744"
+        android:fillColor="#1A8F4A"
         android:pathData="M40,38 h18 v12 h-18 z" />
     <!-- base -->
     <path

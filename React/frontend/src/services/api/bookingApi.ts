@@ -1,3 +1,4 @@
+import type { QueueInfo } from "@/components/booking/QueueInfoCard";
 import { apiClient } from "./apiClient";
 import type { AvailabilityResponse, Booking } from "@/types";
 
@@ -172,7 +173,7 @@ export interface QueuePreview {
     estimatedCompleteAt: string;
     /** "scheduler" (the position a booking would get), "app-nozzle" (today's live line) or "reserved-slot". */
     basis: string;
-  };
+  } & QueueInfo;
   /** The scheduler's summary for the chosen window; null without one. */
   schedule?: {
     fuelType: string;
@@ -241,4 +242,17 @@ export async function fetchUpiPayment(bookingId: string): Promise<UpiPayment | n
   } catch {
     return null;
   }
+}
+
+/**
+ * POST /bookings/:id/station-check-in -- "Check In at Petrol Pump", from the
+ * phone's position. The server checks the booking, the time and the distance
+ * (backend services/booking/stationArrival.js).
+ */
+export async function stationCheckIn(bookingId: string, latitude: number | null, longitude: number | null) {
+  const { data } = await apiClient.post<{ msg?: string; alreadyCheckedIn?: boolean; distanceM?: number; booking?: Booking }>(
+    `/bookings/${bookingId}/station-check-in`,
+    { latitude, longitude },
+  );
+  return data;
 }

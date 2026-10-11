@@ -22,7 +22,16 @@ import type { User } from "@/types";
  *
  * Returns `ready` so the router can hold the first paint until the check
  * resolves, avoiding a flash of the wrong screen (login -> dashboard).
+ *
+ * That hold is BOUNDED. Waiting on the network before drawing anything is
+ * what made the Android app look broken with no signal: the request does not
+ * fail fast when there is nothing to connect to, so the splash sat there
+ * until the client gave up. After BOOT_DEADLINE_MS the app draws with what
+ * it has -- the persisted profile, or the signed-out screens -- and the
+ * check carries on in the background, correcting the session when it
+ * eventually answers.
  */
+const BOOT_DEADLINE_MS = 2500;
 export function useAuthBoot(): { ready: boolean } {
   const [ready, setReady] = useState(false);
   const patchUser = useAuthStore((s) => s.patchUser);
@@ -32,6 +41,11 @@ export function useAuthBoot(): { ready: boolean } {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Draw the app even if the server never answers.
+    const deadline = window.setTimeout(() => {
+      if (!cancelled) setReady(true);
+    }, BOOT_DEADLINE_MS);
 
     async function verify() {
       if (!isAuthenticated) {
@@ -55,9 +69,10 @@ export function useAuthBoot(): { ready: boolean } {
       setReady(true);
     }
 
-    verify();
+    void verify();
     return () => {
       cancelled = true;
+      window.clearTimeout(deadline);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

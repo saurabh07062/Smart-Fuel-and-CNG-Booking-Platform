@@ -157,11 +157,27 @@ async function buildInvoiceData(booking, { invoiceNo, verifyCode, issuedAt }) {
       phone: maskPhone(customer?.phone),
     },
     vehicle: { plate: booking.vehiclePlate || null, name: booking.vehicleName || null },
+    /**
+     * How the customer asked for it (models/Booking.js bookedBy).
+     *
+     * The figures on the invoice are the same either way -- the quantity
+     * dispensed, at the rate, plus the fee. This only lets the document say
+     * "Booked for ₹1000 of Petrol" beside them, so a customer who typed an
+     * amount can recognise their own order on it.
+     */
+    bookedBy: booking.bookedBy === "amount" ? "amount" : "quantity",
+    requestedAmount: booking.bookedBy === "amount" ? round2(booking.requestedAmount) : null,
     lines: [
       {
         sr: 1,
         name: FUEL_NAME[fuel],
-        description: [`Dispensed at pump, ${qty.toFixed(2)} ${FUEL_UNIT[fuel]}`, "Price incl. State VAT"],
+        description: [
+          `Dispensed at pump, ${qty.toFixed(2)} ${FUEL_UNIT[fuel]}`,
+          ...(booking.bookedBy === "amount" && booking.requestedAmount
+            ? [`Booked for Rs ${round2(booking.requestedAmount)} of fuel`]
+            : []),
+          "Price incl. State VAT",
+        ],
         hsn: HSN[fuel],
         qty: `${qty.toFixed(2)} ${FUEL_UNIT[fuel]}`,
         rate: round2(booking.price),
@@ -191,14 +207,34 @@ async function buildInvoiceData(booking, { invoiceNo, verifyCode, issuedAt }) {
           }]
         : []),
     ],
+    /**
+     * Reward points spent on this booking, if any.
+     *
+     * Shown as a deduction BELOW the total, not as a negative line and not by
+     * reducing the taxable value: the fuel was supplied at its full price and
+     * the tax on it is unchanged. The points are a settlement by FuelMart
+     * against the customer's bill, so the invoice reads
+     *
+     *     Total        1,005.07
+     *     Points       - 100.00   (200 points)
+     *     Payable        905.07
+     *
+     * The figures are the booking's stored ones (models/Booking.js
+     * rewardPointsUsed / rewardDiscount / payableAmount), which keep saying
+     * what this customer was charged even after the point rate changes.
+     */
+    discount: round2(Number(booking.rewardDiscount) || 0),
+    rewardPointsUsed: Math.max(0, Math.floor(Number(booking.rewardPointsUsed) || 0)),
     totals: {
       taxable: round2(fuelValue + fee.taxable),
       cgst: fee.cgst,
       sgst: fee.sgst,
       cess: 0,
       total: amount,
+      discount: round2(Number(booking.rewardDiscount) || 0),
+      payable: round2(Number(booking.payableAmount ?? amount)),
     },
-    amountInWords: amountInWords(amount),
+    amountInWords: amountInWords(round2(Number(booking.payableAmount ?? amount))),
     fuel: { key: fuel, label: booking.fuelType },
     refuelling: {
       start: start?.toISOString() || null,

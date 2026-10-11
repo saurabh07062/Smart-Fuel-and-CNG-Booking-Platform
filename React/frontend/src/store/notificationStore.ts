@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { fetchNotifications, type NotificationItem } from "@/services/api/customerApi";
+import { fetchNotifications, markNotificationsRead, type NotificationItem } from "@/services/api/customerApi";
 import { useAuthStore } from "./authStore";
 
 export interface UiNotification {
@@ -18,7 +18,10 @@ interface NotificationState {
   load: () => Promise<void>;
   /** Prepend one, ignoring an id already held. */
   add: (n: UiNotification) => void;
-  markAllRead: () => void;
+  /** Mark every notification read, here and on the server. */
+  markAllRead: () => Promise<void>;
+  /** Mark one read, here and on the server. */
+  markRead: (id: string) => Promise<void>;
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
   clear: () => void;
@@ -58,7 +61,7 @@ function fromApi(n: NotificationItem): UiNotification {
  * socket handler, so the badge and the panel could disagree; deriving it
  * means they cannot.
  */
-export const useNotificationStore = create<NotificationState>((set) => ({
+export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   panelOpen: false,
 
@@ -104,8 +107,59 @@ export const useNotificationStore = create<NotificationState>((set) => ({
         : { notifications: [n, ...s.notifications] },
     ),
 
-  markAllRead: () =>
-    set((s) => ({ notifications: s.notifications.map((n) => ({ ...n, read: true })) })),
+  /**
+   * Mark everything read, on the server as well as here.
+   *
+   * It used to set `read: true` in this store and nothing else. The list is
+   * re-fetched on every reconnect and the server's copy wins for any id it
+   * knows (see `load` above, which is right -- the server holds the
+   * authoritative read state), so the rows came straight back unread and the
+   * panel showed the same messages again, over and over.
+   *
+   * The screen updates first, because a bell badge that waits for a round trip
+   * feels broken. If the request fails the rows that were actually unread go
+   * back to unread, so the badge keeps telling the truth rather than hiding
+   * notifications this device never managed to acknowledge.
+   *
+   * Client-only rows (the completion notice, which has no server row) are
+   * marked read here and simply never sent; `markNotificationsRead` takes no
+   * ids -- the server marks the signed-in customer's own unread ones.
+   */
+  markAllRead: async () => {
+    const before = get().notifications;
+    if (!before.some((n) => !n.read)) return; // nothing to do, and nothing to ask for
+    set({ notifications: before.map((n) => ({ ...n, read: true })) });
+
+    const { isAuthenticated, user } = useAuthStore.getState();
+    if (!isAuthenticated || user?.role !== "customer") return;
+
+    try {
+      await markNotificationsRead();
+    } catch {
+      // Put back exactly the ones that were unread, leaving alone anything
+      // that arrived while the request was in flight.
+      const unreadIds = new Set(before.filter((n) => !n.read).map((n) => n.id));
+      set((s) => ({
+        notifications: s.notifications.map((n) => (unreadIds.has(n.id) ? { ...n, read: false } : n)),
+      }));
+    }
+  },
+
+  /** One notification, read. Same rules as markAllRead. */
+  markRead: async (id) => {
+    const target = get().notifications.find((n) => n.id === id);
+    if (!target || target.read) return;
+    set((s) => ({ notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)) }));
+
+    const { isAuthenticated, user } = useAuthStore.getState();
+    if (!isAuthenticated || user?.role !== "customer") return;
+
+    try {
+      await markNotificationsRead(id);
+    } catch {
+      set((s) => ({ notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: false } : n)) }));
+    }
+  },
 
   setPanelOpen: (panelOpen) => set({ panelOpen }),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),

@@ -33,6 +33,26 @@ export async function fetchNotifications(): Promise<NotificationItem[]> {
   return Array.isArray(data) ? data : [];
 }
 
+/**
+ * Mark notifications read on the SERVER.
+ *
+ * Without an id, every unread one; with an id, just that one. The server
+ * decides whose they are from the session, so no user id is sent.
+ *
+ * This has to be persisted rather than kept in the tab: the list is re-fetched
+ * on every reconnect and the server's copy wins, so a read state that lives
+ * only in memory is undone by the next resync and the same notifications
+ * appear again.
+ *
+ * @returns the number changed, and the authoritative unread count after it.
+ */
+export async function markNotificationsRead(id?: string): Promise<{ updated: number; unread: number }> {
+  const { data } = await apiClient.post<{ updated?: number; unread?: number }>(
+    id ? `/customer/notifications/${encodeURIComponent(id)}/read` : "/customer/notifications/read",
+  );
+  return { updated: data?.updated ?? 0, unread: data?.unread ?? 0 };
+}
+
 interface VehiclesResponse {
   msg?: string;
   vehicles: Vehicle[];

@@ -38,6 +38,8 @@ export interface Station {
   rating?: number;
   amenities?: string[];
   openingHours?: string;
+  /** The number at the pump itself; "" when the station has not recorded one. */
+  contactPhone?: string;
   pricesUpdatedAt?: string | null;
   availabilityUpdatedAt?: string | null;
   updatedAt?: string;
